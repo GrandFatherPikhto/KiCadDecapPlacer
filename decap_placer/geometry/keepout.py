@@ -4,6 +4,15 @@ import math
 from typing import List, Tuple, Optional
 from kipy.geometry import Vector2
 
+"""
+* Класс Rect — AABB-прямоугольник, используется для представления зон занятости (keepout).
+* from_bbox — строит Rect из Box2, полученного от адаптера, с запасом clearance.
+* from_circle — аппроксимирует окружность квадратом (для via).
+* intersects — проверка пересечения двух Rect.
+* point_is_clear — проверяет, свободна ли точка (не пересекает ли окружность via с радиусом via_radius ни один keepout-прямоугольник).
+* build_keepout — принимает список bounding box'ов и строит список Rect с запасом clearance_mm (используется для создания keepout-областей из существующих компонентов и via).
+* find_free_point — ищет свободную точку вокруг идеальной позиции ideal, расширяясь по спирали. Учитывает предпочтительное направление (preferred_direction). Используется для поиска места для via, чтобы избежать коллизий.
+"""
 
 class Rect:
     """Простой AABB-прямоугольник в координатах платы (нм)."""

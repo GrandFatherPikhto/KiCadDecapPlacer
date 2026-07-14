@@ -1,5 +1,12 @@
 # decap_placer/placement/collision.py
 
+"""
+* _radius_from_bbox – вычисление радиуса как половина диагонали.
+* compute_radii – батч-запрос радиусов для списка футпринтов.
+* footprints_overlap – проверка перекрытия двух кругов.
+* check_collisions – основная функция, проверяет коллизии между перемещаемыми и неперемещаемыми компонентами
+"""
+
 import logging
 import math
 from typing import List, Tuple, Set, Dict, Optional

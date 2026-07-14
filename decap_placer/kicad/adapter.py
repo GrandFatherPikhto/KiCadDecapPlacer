@@ -5,8 +5,7 @@ import logging
 from typing import List, Optional, Any
 import kipy
 from kipy.board_types import FootprintInstance, Zone, Net, Via, ViaType, BoardLayer, Pad
-from kipy.geometry import Vector2, Angle
-from kipy.proto.common.types import base_types_pb2 as common_types_pb2
+from kipy.geometry import Vector2, Box2, Angle
 
 from .interfaces import IBoardAdapter
 from ..exceptions import BoardNotFoundError, ComponentNotFoundError
@@ -14,10 +13,9 @@ from ..utils.units import MM
 
 logger = logging.getLogger(__name__)
 
-class KiCadBoardAdapter:
+class KiCadBoardAdapter(IBoardAdapter):
     def __init__(self, timeout_ms: int = 20000):
         logger.debug(f"Инициализация KiCadBoardAdapter с таймаутом {timeout_ms} мс")
-        self._kicad = kipy.KiCad(timeout_ms=timeout_ms)
         logger.debug("Создание экземпляра kipy.KiCad...")
         self._kicad = kipy.KiCad(timeout_ms=timeout_ms)
         logger.debug("Экземпляр kipy.KiCad создан")
@@ -83,7 +81,7 @@ class KiCadBoardAdapter:
         return nets
 
     # --- Bounding box (для коллизий — см. collision.py) ---
-    def get_bounding_boxes(self, items) -> List[Optional[Any]]:
+    def get_bounding_boxes(self, items) -> List[Optional[Box2]]:
         """
         Возвращает bounding box'ы (Box2 | None) для списка элементов ОДНИМ
         запросом. Board.get_item_bounding_box(list) возвращает List[Optional[Box2]]

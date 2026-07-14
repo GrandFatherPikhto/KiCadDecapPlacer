@@ -1,4 +1,5 @@
 # decap_placer/placement/services/power_pin_orienter.py
+
 import math
 import logging
 from typing import List, Tuple, Optional
@@ -12,13 +13,8 @@ from ..power_pin import resolve_power_pin_facing
 
 logger = logging.getLogger(__name__)
 
-class PowerPinOrienter:
-    """
-    Корректирует угол поворота компонента так, чтобы его силовой вывод
-    (не-GND) смотрел в нужную сторону: к площадке IC1 (facing='pad')
-    или от неё (facing='away').
-    """
 
+class PowerPinOrienter:
     def __init__(self, adapter: KiCadBoardAdapter, config: Config):
         self.adapter = adapter
         self.cfg = config
@@ -30,29 +26,30 @@ class PowerPinOrienter:
         target_layer: BoardLayer,
         rules: List[Rule]
     ) -> List[Tuple[SpokeComponent, Vector2, Tuple[float, float], float]]:
-        """
-        Принимает список (component, dest, direction, angle_base).
-        Для каждого компонента определяет требуемое направление силового вывода
-        (через resolve_power_pin_facing) и корректирует угол.
-        Возвращает список с обновлёнными углами (четвёртый элемент).
-        """
         adjusted = []
         for component, dest, direction, angle_base in raw:
-            # Найти спицу, к которой принадлежит компонент
             spoke = self._find_spoke(component, rules)
             if spoke is None:
                 logger.warning(f"Не найдена спица для {component.ref}, пропускаем коррекцию угла")
                 adjusted.append((component, dest, direction, angle_base))
                 continue
 
-            # Найти пад IC1 для этой спицы
+            # Определяем facing
+            if len(spoke.components) >= 2:
+                if component.placement == "inside":
+                    facing = "away"
+                else:
+                    facing = "pad"
+                logger.debug(f"  {component.ref}: автоматический facing={facing} (спица с {len(spoke.components)} компонентами)")
+            else:
+                facing = resolve_power_pin_facing(component, spoke, self.cfg)
+
             pad = self.adapter.get_pad_by_number(target_fp, spoke.pad)
             if pad is None:
                 logger.warning(f"Не найден пад {spoke.pad} у {self.cfg.target_ref}, пропускаем коррекцию угла")
                 adjusted.append((component, dest, direction, angle_base))
                 continue
 
-            facing = resolve_power_pin_facing(component, spoke, self.cfg)
             corrected_angle = self._resolve_facing_angle(
                 component, pad, dest, angle_base, facing, target_layer
             )
@@ -64,7 +61,6 @@ class PowerPinOrienter:
         return adjusted
 
     def _find_spoke(self, component: SpokeComponent, rules: List[Rule]) -> Optional[Spoke]:
-        """Находит спицу, содержащую данный компонент."""
         for rule in rules:
             for spoke in rule.spokes:
                 if any(c.ref == component.ref for c in spoke.components):
@@ -72,11 +68,6 @@ class PowerPinOrienter:
         return None
 
     def _find_power_pad(self, fp: FootprintInstance, component: SpokeComponent) -> Optional[Pad]:
-        """
-        Находит силовой (не-GND) пад компонента. Если component.power_net
-        задан явно — ищет пад именно с этой цепью, иначе берёт первый пад,
-        чья цепь не GND.
-        """
         pads = self.adapter.get_footprint_pads(fp)
         if component.power_net:
             for p in pads:
@@ -97,17 +88,6 @@ class PowerPinOrienter:
         facing: str,
         target_layer: BoardLayer
     ) -> float:
-        """
-        Пункт 2 задачи ("power_pin_facing"). НЕ выводим знак поворота
-        аналитически — вместо этого читаем РЕАЛЬНЫЕ пады компонента,
-        пробуем оба кандидатных угла (angle_base и angle_base+180°),
-        считаем, где окажется силовой пад при каждом варианте, и выбираем
-        тот, где он ближе к площадке IC1 (facing="pad") или дальше
-        (facing="away").
-
-        Вращение делается через Vector2.rotate() (тот же метод, что и сам
-        kipy использует внутри FootprintInstance.orientation).
-        """
         fp = self.adapter.get_footprint(component.ref)
         if fp is None:
             logger.warning(f"power_pin_facing: {component.ref} не найден на плате, "
@@ -138,6 +118,12 @@ class PowerPinOrienter:
         candidates = [angle_base, angle_base + 180.0]
         dists = [(predicted_pos(a) - ic_pad.position).length() for a in candidates]
 
+        # Отладка
+        logger.debug(
+            f"    {component.ref}: power_pad лок.={local_offset.x/MM:.3f},{local_offset.y/MM:.3f} мм, "
+            f"кандидаты={[round(c,1) for c in candidates]}, расстояния={[round(d/MM,3) for d in dists]}"
+        )
+
         if facing == "pad":
             chosen = candidates[0] if dists[0] < dists[1] else candidates[1]
         elif facing == "away":
@@ -145,7 +131,5 @@ class PowerPinOrienter:
         else:
             raise ValueError(f"неизвестный power_pin_facing: {facing!r} (ожидается 'pad' или 'away')")
 
-        logger.debug(f"  {component.ref}: power_pin_facing={facing}, "
-                     f"кандидаты={[round(c, 1) for c in candidates]}°, "
-                     f"расстояния={[round(d / MM, 3) for d in dists]}мм, выбран {chosen:.1f}°")
+        logger.debug(f"    {component.ref}: выбран {chosen:.1f}°")
         return chosen

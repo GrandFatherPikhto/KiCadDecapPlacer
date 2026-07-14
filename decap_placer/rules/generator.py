@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple, Optional
 from collections import OrderedDict
 import math
 from .parser import parse_net_file, parse_pcb_file
-from ..config import Rule, Spoke, SpokeComponent, ViaConfig
+from ..config import Rule, Spoke, SpokeComponent
 
 class RulesGenerator:
     def __init__(self,

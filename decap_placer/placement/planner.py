@@ -8,7 +8,6 @@ from kipy.geometry import Vector2, Angle
 
 from ..config import Config, ViaConfig, SpokeComponent, Spoke
 from ..kicad.adapter import KiCadBoardAdapter
-from ..geometry.strategies import PlacementStrategy, RadialStrategy, OrthogonalStrategy, FixedStrategy, BoundaryStrategy
 from ..geometry.boundary import polyline_points
 from ..geometry.thermal_grid import compute_thermal_via_grid
 from ..geometry.relax import relax_positions
@@ -40,7 +39,6 @@ class PlacementPlanner:
         self.cfg = config
         self.optimizer = OptimizerFactory.create(config.optimizer_type, adapter, config)
         # self.spacing_relaxer = SpacingRelaxer(adapter, config)
-        self._strategy = self._create_strategy()
         self._target_fp = adapter.get_footprint(config.target_ref)
         if self._target_fp is None:
             raise ComponentNotFoundError(f"Целевой компонент {config.target_ref} не найден")
@@ -55,23 +53,6 @@ class PlacementPlanner:
         self._zone_center_point = self._compute_zone_center(self._boundary_polygon)
         self._planned = None  # заполняется в plan_moves(), нужно plan_vias()
         logger.info(f"Планировщик инициализирован: target={config.target_ref}, side={config.side}")
-
-    def _create_strategy(self) -> PlacementStrategy:
-        mode = self.cfg.rotation_mode
-        if mode == "radial":
-            logger.debug("Выбрана радиальная стратегия")
-            return RadialStrategy()
-        elif mode == "orthogonal":
-            logger.debug("Выбрана ортогональная стратегия")
-            return OrthogonalStrategy()
-        elif mode == "fixed":
-            logger.debug(f"Выбрана фиксированная стратегия (угол {self.cfg.fixed_angle_deg}°)")
-            return FixedStrategy()
-        elif mode == "boundary":
-            logger.debug(f"Выбрана стратегия по границам")
-            return BoundaryStrategy()
-        else:
-            raise ValueError(f"Неизвестный rotation_mode: {mode}")
 
     def _get_boundary_polygon(self):
         zone = self.adapter.get_zone_by_name(self.cfg.boundary_zone)
@@ -97,7 +78,7 @@ class PlacementPlanner:
         return angle_deg
 
     def plan_moves(self) -> List[MoveCommand]:
-        initial = []   # оптимизатор сам сгенерирует начальное приближение
+        initial = []
         final = self.optimizer.optimize(
             initial,
             self._target_fp,
@@ -109,12 +90,19 @@ class PlacementPlanner:
         moves = []
         self._planned = []
         for fp in final:
-            angle_obj = Angle.from_degrees(fp.angle)
-            moves.append(MoveCommand(ref=fp.component.ref, position=fp.position,
-                                    angle=angle_obj, layer=self._target_layer))
+            angle_deg = fp.angle
+            # Зеркалирование для back-стороны
+            if self.cfg.side == "back":
+                angle_deg = 180.0 - angle_deg
+            angle_obj = Angle.from_degrees(angle_deg)
+            moves.append(MoveCommand(
+                ref=fp.component.ref,
+                position=fp.position,
+                angle=angle_obj,
+                layer=self._target_layer
+            ))
             self._planned.append((fp.component, fp.position, fp.direction))
         logger.info(f"plan_moves завершено: {len(moves)} перемещений")
-
         return moves
         
     def plan_vias(self) -> List[ViaCommand]:
@@ -122,7 +110,8 @@ class PlacementPlanner:
             planned=self._planned,
             target_fp=self._target_fp,
             zone_center_point=self._zone_center_point,
-            boundary_polygon=self._boundary_polygon
+            boundary_polygon=self._boundary_polygon,
+            rules=self.cfg.rules
         )
 
     def plan(self) -> Tuple[List[MoveCommand], List[ViaCommand]]:

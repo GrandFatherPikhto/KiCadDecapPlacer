@@ -1,8 +1,16 @@
 # decap_placer/geometry/boundary.py
 
+"""
+Содержит базовые геометрические функции для работы с полигоном зоны (RA_DECAP_ZONE):
+* ray_boundary_distance() – вычисляет расстояние от точки (центра микросхемы) до пересечения луча с границей зоны. Используется в радиальных стратегиях для определения, где заканчивается зона.
+* closest_point_on_polygon() – находит ближайшую точку на полигоне зоны к заданному паду и возвращает нормаль наружу (это важно для стратегии boundary).
+* polygon_signed_area() – определяет ориентацию обхода полигона (по часовой/против часовой), что нужно для корректного вычисления направления "наружу".
+"""
+
 import math
 from typing import List, Tuple
 from kipy.geometry import Vector2
+
 from ..exceptions import GeometryError
 
 def polyline_points(polyline):

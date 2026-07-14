@@ -19,15 +19,8 @@ class ViaConfig:
 
 @dataclass
 class PowerViaConfig:
-    """
-    Силовая переходная виа СПИЦЫ (не путать с GND-стежком компонента!) —
-    поднимает цепь питания с обратного слоя (где живут конденсаторы) на
-    лицевой (где сам IC1), рядом с конкретным выводом IC1. Цепь берётся
-    из net правила (rule.net), отдельной настройки не нужно — виа и так
-    физически на этой же спице/цепи.
-    """
     enabled: bool = False
-    placement: str = "inside"  # inside | outside — та же семантика, что и у компонентов
+    placement: str = "inside"
     offset_mm: float = 0.3
     drill_mm: float = 0.3
     diameter_mm: float = 0.6
@@ -47,45 +40,20 @@ class ThermalViaArrayConfig:
 
 @dataclass
 class SpokeComponent:
-    """
-    Один компонент на спице (обычно конденсатор, но не обязательно —
-    спица не привязана к конкретному типу). pad здесь больше НЕТ — он
-    один на всю спицу (см. Spoke.pad), а не дублируется в каждом
-    компоненте, как раньше в Assignment.
-    """
     ref: str
     placement: str
     offset_mm: float
     via: Optional[Union[bool, Dict[str, Any]]] = None
-    # Явное имя силовой цепи компонента — опционально. Если не задано,
-    # силовой вывод определяется как "тот, что не GND" (через pad.net.name
-    # на живой плате). Явное указание не обязательно, но убирает даже
-    # гипотетическую двусмысленность и чуть упрощает код расстановки.
     power_net: Optional[str] = None
-    # Переопределение направления силового вывода ТОЛЬКО для этого
-    # компонента. None = наследовать со спицы, дальше с глобального
-    # Config.power_pin_facing (тот же паттерн приоритета, что и у via:).
-    power_pin_facing: Optional[str] = None  # "pad" | "away" | None
+    power_pin_facing: Optional[str] = None
 
 @dataclass
 class Spoke:
-    """
-    Спица — все компоненты, физически относящиеся к одному выводу IC1.
-    Компонентов может быть 0, 1, 2 или больше (например, второй inside-
-    конденсатор, которому не хватило пары 4.7uF, как C27 у VCCINT).
-    Спица — чисто ДЕКЛАРАТИВНАЯ группировка ("кто на каком выводе"), она
-    НЕ диктует жёсткость геометрии сама по себе — см. planner: раздвижка
-    сначала пробует двигать спицу единым блоком (фаза A), и только если
-    это невозможно в пределах допуска — расклеивает её на отдельные точки
-    (фаза B, обычный relax_1d).
-    """
     pad: str
     components: List[SpokeComponent] = field(default_factory=list)
     power_via: Optional[PowerViaConfig] = None
-    # Переопределение направления силового вывода для ВСЕХ компонентов
-    # этой спицы (если они сами не переопределяют своё). None = наследовать
-    # с глобального Config.power_pin_facing.
-    power_pin_facing: Optional[str] = None  # "pad" | "away" | None
+    power_pin_facing: Optional[str] = None
+    shift_along_boundary_mm: float = 0.0   # <-- новое поле
 
 @dataclass
 class Rule:
@@ -97,33 +65,21 @@ class Config:
     target_ref: str
     boundary_zone: str
     side: str
-    rotation_mode: str
-    fixed_angle_deg: float
+    rotation_mode: str  # deprecated, оставлено для обратной совместимости
+    fixed_angle_deg: float  # deprecated
     via: ViaConfig
     thermal_via_array: ThermalViaArrayConfig
     rules: List[Rule]
     min_row_spacing_mm: float = 2.0
-    # Глобальный дефолт направления силового вывода: "pad" — силовой пин
-    # смотрит НА площадку IC1, "away" — от неё. Переопределяется на уровне
-    # спицы (Spoke.power_pin_facing) и/или компонента
-    # (SpokeComponent.power_pin_facing) — локальное определение имеет
-    # приоритет над глобальным, глобальное — над этим дефолтом.
     power_pin_facing: str = "away"
-    # Допуск (мм) на "жёсткий" сдвиг спицы целиком при раздвижке (фаза A).
-    # Если спице требуется сдвинуться больше этого — она расклеивается на
-    # отдельные компоненты (фаза B, relax_1d как раньше).
     max_spoke_rigid_shift_mm: float = 1.5
-    # Клиренс (мм) вокруг пад IC1/конденсаторов при поиске свободного места
-    # под виа (geometry/keepout.py). Обсуждался диапазон 0.15-0.2мм.
     via_keepout_clearance_mm: float = 0.2
-    # Параметры поиска свободного места для via
     via_search_step_mm: float = 0.1
     via_search_max_radius_mm: float = 3.0
     via_search_n_directions: int = 8
-    
-    optimizer_type: str = "nlp" # "heuristic" или "nlp"
+    optimizer_type: str = "nlp"
     relax_max_iterations: int = 10
-    relax_group_tolerance_nm: int = 1000  # в нанометрах, для округления групп
+    relax_group_tolerance_nm: int = 1000
 
 
 def _load_via_config(via_data: Dict[str, Any]) -> ViaConfig:
@@ -192,6 +148,7 @@ def load_config(path: str) -> Config:
                 components=components,
                 power_via=power_via,
                 power_pin_facing=spoke_data.get('power_pin_facing'),
+                shift_along_boundary_mm=spoke_data.get('shift_along_boundary_mm', 0.0),  # <-- загрузка
             ))
         rules.append(Rule(net=rule_data['net'], spokes=spokes))
 
