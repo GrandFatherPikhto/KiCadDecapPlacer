@@ -117,3 +117,39 @@ def find_free_point(
         ring += step
 
     return None
+
+
+def find_free_point_along_line(
+    ideal: Vector2,
+    keepout: List[Rect],
+    via_radius: float,
+    line_direction: Tuple[float, float],
+    step_mm: float = 0.1,
+    max_radius_mm: float = 3.0,
+    mm_per_unit: int = 1_000_000,
+) -> Optional[Vector2]:
+    """
+    Ищет свободную точку вдоль прямой, проходящей через ideal,
+    с направлением line_direction (единичный вектор).
+    Сначала проверяет ideal, затем отступает в обе стороны с шагом step_mm.
+    Возвращает первую найденную свободную точку или None.
+    """
+    step = int(step_mm * mm_per_unit)          # преобразуем в целое
+    max_radius = int(max_radius_mm * mm_per_unit)  # преобразуем в целое
+    dx, dy = line_direction
+
+    if point_is_clear(ideal, via_radius, keepout):
+        return ideal
+
+    # Проверяем в обе стороны
+    for sign in (1, -1):
+        r = step
+        while r <= max_radius:
+            candidate = Vector2.from_xy(
+                int(ideal.x + sign * r * dx),
+                int(ideal.y + sign * r * dy)
+            )
+            if point_is_clear(candidate, via_radius, keepout):
+                return candidate
+            r += step
+    return None

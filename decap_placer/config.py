@@ -2,31 +2,15 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Union, Dict, Any, List
+from typing import Optional, List, Dict, Any
 import yaml
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class ViaConfig:
-    enabled: bool = False
-    net: str = "GND"
-    drill_mm: float = 0.3
-    diameter_mm: float = 0.6
-    offset_from_cap_mm: float = 1.0
-    direction: str = "away_from_pad"
-    count: int = 1
-
-@dataclass
-class PowerViaConfig:
-    enabled: bool = False
-    placement: str = "inside"
-    offset_mm: float = 0.3
-    drill_mm: float = 0.3
-    diameter_mm: float = 0.6
 
 @dataclass
 class ThermalViaArrayConfig:
+    """Конфигурация массива тепловых via под термопадом IC."""
     enabled: bool = False
     target_ref: str = ""
     pad: str = ""
@@ -38,69 +22,145 @@ class ThermalViaArrayConfig:
     drill_mm: float = 0.3
     diameter_mm: float = 0.5
 
-@dataclass
-class SpokeComponent:
-    ref: str
-    placement: str
-    offset_mm: float
-    via: Optional[Union[bool, Dict[str, Any]]] = None
-    power_net: Optional[str] = None
-    power_pin_facing: Optional[str] = None
 
 @dataclass
-class Spoke:
+class TemplatePowerVia:
+    """
+    Power via внутри шаблона спицы — координаты локальные (along/across),
+    считаются от нуля шаблона (там же, где сам шаблон крепится к паду FPGA).
+    along/across — оси уже ПОВЁРНУТОГО шаблона (см. ManualSpoke.rotation_deg),
+    а не координаты платы напрямую.
+    """
+    offset_along_mm: float = 0.0
+    offset_across_mm: float = 0.0
+    net: Optional[str] = None  # None = взять из net правила (rule.net)
+    drill_mm: float = 0.3
+    diameter_mm: float = 0.6
+
+
+@dataclass
+class TemplateComponentSlot:
+    """
+    Один компонент-слот в шаблоне ('тонкий'/'лёгкий' или 'толстый'/'тяжёлый'
+    конденсатор — роль, не конкретный ref; конкретный ref подставляется на
+    этапе расстановки спицы). Координаты локальные (along/across).
+    GND via этого слота — координаты от СОБСТВЕННОГО земляного пада этого
+    компонента (не от нуля шаблона), но в той же повёрнутой оси.
+    """
+    offset_along_mm: float = 0.0
+    offset_across_mm: float = 0.0
+    angle_deg: float = 0.0
+    gnd_via_offset_along_mm: float = 0.0
+    gnd_via_offset_across_mm: float = 0.0
+    gnd_via_net: str = "GND"
+    gnd_via_drill_mm: float = 0.3
+    gnd_via_diameter_mm: float = 0.6
+
+
+@dataclass
+class SpokeTemplate:
+    """
+    Шаблон спицы — вся геометрия локальная и поворотоинвариантная:
+    описывается один раз при rotation_deg=0 (условный эталонный борт),
+    дальше конкретная спица поворачивает его целиком на свой угол.
+    Любой из трёх элементов может отсутствовать (None) — например, спица
+    без power via, или только с одним компонентом.
+    """
+    name: str
+    power_via: Optional[TemplatePowerVia] = None
+    component1: Optional[TemplateComponentSlot] = None
+    component2: Optional[TemplateComponentSlot] = None
+
+
+@dataclass
+class ManualSpoke:
+    """
+    Конкретная спица на конкретном паде FPGA. shift_x_mm/shift_y_mm и
+    rotation_deg — ВСЕГДА в обычных координатах KiCad (не локальных),
+    подбираются глазами под конкретный борт. Порядок применения: сначала
+    сдвиг (shift_x, shift_y) от центра пада к нулю спицы, затем поворот
+    получившегося нуля (и всего содержимого шаблона) на rotation_deg.
+    """
     pad: str
-    components: List[SpokeComponent] = field(default_factory=list)
-    power_via: Optional[PowerViaConfig] = None
-    power_pin_facing: Optional[str] = None
-    shift_along_boundary_mm: float = 0.0   # <-- новое поле
+    template: str
+    shift_x_mm: float = 0.0
+    shift_y_mm: float = 0.0
+    rotation_deg: float = 0.0
+    component1_ref: Optional[str] = None
+    component2_ref: Optional[str] = None
+    enabled: bool = True
+
 
 @dataclass
 class Rule:
     net: str
-    spokes: List[Spoke]
+    spokes: List[ManualSpoke]
+
 
 @dataclass
 class Config:
+    """Главный конфигурационный объект."""
     target_ref: str
-    boundary_zone: str
-    side: str
-    rotation_mode: str  # deprecated, оставлено для обратной совместимости
-    fixed_angle_deg: float  # deprecated
-    via: ViaConfig
-    thermal_via_array: ThermalViaArrayConfig
-    rules: List[Rule]
-    min_row_spacing_mm: float = 2.0
-    power_pin_facing: str = "away"
-    max_spoke_rigid_shift_mm: float = 1.5
+    side: str = "back"
+    templates: Dict[str, SpokeTemplate] = field(default_factory=dict)
+    thermal_via_array: ThermalViaArrayConfig = field(default_factory=ThermalViaArrayConfig)
+    rules: List[Rule] = field(default_factory=list)
+    place_components: bool = True
+    skip_existing_components: bool = False
+    # Параметры поиска свободного места -- сейчас используются только для
+    # термовиа (у power/GND via ручное позиционирование, поиска нет).
     via_keepout_clearance_mm: float = 0.2
     via_search_step_mm: float = 0.1
     via_search_max_radius_mm: float = 3.0
     via_search_n_directions: int = 8
-    optimizer_type: str = "nlp"
-    relax_max_iterations: int = 10
-    relax_group_tolerance_nm: int = 1000
 
 
-def _load_via_config(via_data: Dict[str, Any]) -> ViaConfig:
-    return ViaConfig(
-        enabled=via_data.get('enabled', False),
-        net=via_data.get('net', 'GND'),
-        drill_mm=via_data.get('drill_mm', 0.3),
-        diameter_mm=via_data.get('diameter_mm', 0.6),
-        offset_from_cap_mm=via_data.get('offset_from_cap_mm', 1.0),
-        direction=via_data.get('direction', 'away_from_pad'),
-        count=via_data.get('count', 1),
+def _load_template_power_via(data: Optional[Dict[str, Any]]) -> Optional[TemplatePowerVia]:
+    if not data:
+        return None
+    return TemplatePowerVia(
+        offset_along_mm=data.get('offset_along_mm', 0.0),
+        offset_across_mm=data.get('offset_across_mm', 0.0),
+        net=data.get('net'),
+        drill_mm=data.get('drill_mm', 0.3),
+        diameter_mm=data.get('diameter_mm', 0.6),
     )
 
 
-def _load_power_via_config(pv_data: Dict[str, Any]) -> PowerViaConfig:
-    return PowerViaConfig(
-        enabled=pv_data.get('enabled', False),
-        placement=pv_data.get('placement', 'inside'),
-        offset_mm=pv_data.get('offset_mm', 0.3),
-        drill_mm=pv_data.get('drill_mm', 0.3),
-        diameter_mm=pv_data.get('diameter_mm', 0.6),
+def _load_template_component_slot(data: Optional[Dict[str, Any]]) -> Optional[TemplateComponentSlot]:
+    if not data:
+        return None
+    return TemplateComponentSlot(
+        offset_along_mm=data.get('offset_along_mm', 0.0),
+        offset_across_mm=data.get('offset_across_mm', 0.0),
+        angle_deg=data.get('angle_deg', 0.0),
+        gnd_via_offset_along_mm=data.get('gnd_via_offset_along_mm', 0.0),
+        gnd_via_offset_across_mm=data.get('gnd_via_offset_across_mm', 0.0),
+        gnd_via_net=data.get('gnd_via_net', 'GND'),
+        gnd_via_drill_mm=data.get('gnd_via_drill_mm', 0.3),
+        gnd_via_diameter_mm=data.get('gnd_via_diameter_mm', 0.6),
+    )
+
+
+def _load_spoke_template(name: str, data: Dict[str, Any]) -> SpokeTemplate:
+    return SpokeTemplate(
+        name=name,
+        power_via=_load_template_power_via(data.get('power_via')),
+        component1=_load_template_component_slot(data.get('component1')),
+        component2=_load_template_component_slot(data.get('component2')),
+    )
+
+
+def _load_manual_spoke(data: Dict[str, Any]) -> ManualSpoke:
+    return ManualSpoke(
+        pad=data['pad'],
+        template=data['template'],
+        shift_x_mm=data.get('shift_x_mm', 0.0),
+        shift_y_mm=data.get('shift_y_mm', 0.0),
+        rotation_deg=data.get('rotation_deg', 0.0),
+        component1_ref=data.get('component1'),
+        component2_ref=data.get('component2'),
+        enabled=data.get('enabled', True),
     )
 
 
@@ -109,12 +169,10 @@ def load_config(path: str) -> Config:
     with open(path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
 
-    via = _load_via_config(data.get('via', {}))
-
     tva_data = data.get('thermal_via_array', {})
     thermal_via = ThermalViaArrayConfig(
         enabled=tva_data.get('enabled', False),
-        target_ref=tva_data.get('target_ref', data['target_ref']),
+        target_ref=tva_data.get('target_ref', data.get('target_ref', '')),
         pad=tva_data.get('pad', ''),
         net=tva_data.get('net', 'GND'),
         rows=tva_data.get('rows', 4),
@@ -125,52 +183,28 @@ def load_config(path: str) -> Config:
         diameter_mm=tva_data.get('diameter_mm', 0.5),
     )
 
+    templates_data = data.get('templates', {})
+    templates = {name: _load_spoke_template(name, tdata) for name, tdata in templates_data.items()}
+
     rules = []
     for rule_data in data.get('rules', []):
-        spokes = []
-        for spoke_data in rule_data.get('spokes', []):
-            components = []
-            for comp_data in spoke_data.get('components', []):
-                components.append(SpokeComponent(
-                    ref=comp_data['ref'],
-                    placement=comp_data.get('placement', 'outside'),
-                    offset_mm=comp_data.get('offset_mm', 1.0),
-                    via=comp_data.get('via'),
-                    power_net=comp_data.get('power_net'),
-                    power_pin_facing=comp_data.get('power_pin_facing'),
-                ))
-
-            power_via_data = spoke_data.get('power_via')
-            power_via = _load_power_via_config(power_via_data) if power_via_data else None
-
-            spokes.append(Spoke(
-                pad=spoke_data['pad'],
-                components=components,
-                power_via=power_via,
-                power_pin_facing=spoke_data.get('power_pin_facing'),
-                shift_along_boundary_mm=spoke_data.get('shift_along_boundary_mm', 0.0),  # <-- загрузка
-            ))
+        spokes = [_load_manual_spoke(spoke_data) for spoke_data in rule_data.get('spokes', [])]
         rules.append(Rule(net=rule_data['net'], spokes=spokes))
 
     cfg = Config(
         target_ref=data['target_ref'],
-        boundary_zone=data['boundary_zone'],
         side=data.get('side', 'back'),
-        rotation_mode=data.get('rotation_mode', 'radial'),
-        fixed_angle_deg=data.get('fixed_angle_deg', 0.0),
-        via=via,
+        templates=templates,
         thermal_via_array=thermal_via,
         rules=rules,
-        min_row_spacing_mm=data.get('min_row_spacing_mm', 2.0),
-        power_pin_facing=data.get('power_pin_facing', 'away'),
-        max_spoke_rigid_shift_mm=data.get('max_spoke_rigid_shift_mm', 1.5),
+        place_components=data.get('place_components', True),
+        skip_existing_components=data.get('skip_existing_components', False),
         via_keepout_clearance_mm=data.get('via_keepout_clearance_mm', 0.2),
         via_search_step_mm=data.get('via_search_step_mm', 0.1),
         via_search_max_radius_mm=data.get('via_search_max_radius_mm', 3.0),
         via_search_n_directions=data.get('via_search_n_directions', 8),
     )
-    total_components = sum(len(s.components) for r in cfg.rules for s in r.spokes)
+    total_spokes = sum(len(r.spokes) for r in cfg.rules)
     logger.debug(f"Конфигурация загружена: target={cfg.target_ref}, side={cfg.side}, "
-                 f"правил={len(cfg.rules)}, спиц={sum(len(r.spokes) for r in cfg.rules)}, "
-                 f"компонентов={total_components}")
+                 f"шаблонов={len(cfg.templates)}, правил={len(cfg.rules)}, спиц={total_spokes}")
     return cfg

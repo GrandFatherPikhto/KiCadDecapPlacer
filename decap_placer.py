@@ -4,7 +4,7 @@ placer.py — главный скрипт для расстановки разв
 
 Использование:
     python placer.py decap_placement.yaml [--dry-run] [--timeout-ms 20000] [--batch-size 10]
-    python placer.py generate --net <file.net> --pcb <file.kicad_pcb> [--output rules.yaml]
+    python placer.py undo [--verbose]
 """
 
 import argparse
@@ -20,31 +20,21 @@ from decap_placer.kicad.adapter import KiCadBoardAdapter
 from decap_placer.placement.planner import PlacementPlanner
 from decap_placer.placement.executor import BatchExecutor
 from decap_placer.exceptions import PlacerError
-from decap_placer.rules.generator import RulesGenerator
-
-# --- Группы конденсаторов для генератора ---
-DEFAULT_GROUPS = {
-    "+3V3_VCCIO":      {"100nF": [f"C{i}" for i in range(5, 15)],   "4.7uF": [f"C{i}" for i in range(30, 38)]},
-    "+1V2_VCCINT":     {"100nF": [f"C{i}" for i in range(19, 28)],  "4.7uF": [f"C{i}" for i in range(40, 47)]},
-    "+2V5_VCCA":       {"100nF": ["C28", "C29"],                     "4.7uF": ["C51", "C52"]},
-    "+1V2_VCCD_PLL":   {"100nF": ["C38", "C39"],                     "4.7uF": ["C53", "C54"]},
-}
+from decap_placer.undo import undo_last_operation
 
 
 def setup_logging(verbose: bool = False, log_file: str = None):
     """Настройка логирования: уровень и вывод в консоль и/или файл."""
     level = logging.DEBUG if verbose else logging.INFO
     handlers = []
-    # Консольный обработчик
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(level)
     console.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     handlers.append(console)
 
-    # Файловый обработчик (если указан)
     if log_file:
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_handler.setLevel(logging.DEBUG)  # В файл пишем всё
+        file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         handlers.append(file_handler)
 
@@ -63,73 +53,89 @@ def cmd_apply(args):
 
     logger.info("Планирование расстановки...")
     planner = PlacementPlanner(adapter, cfg)
-    moves, vias = planner.plan()
-
-    logger.info(f"Запланировано перемещений: {len(moves)}, виа: {len(vias)}")
 
     if args.dry_run:
+        # ВАЖНО: в dry-run ничего не коммитится, поэтому plan_vias() здесь
+        # видит ещё НЕ перемещённые компоненты — GND via в этом режиме
+        # считалась бы от старой позиции. Честно предупреждаем и не
+        # показываем виа вовсе, вместо того чтобы притворяться точным
+        # предпросмотром.
+        moves = planner.plan_moves()
         print("\n=== DRY RUN ===")
         print("Перемещения:")
         for m in moves:
             print(f"  {m.ref}: ({m.position.x/1e6:.3f}, {m.position.y/1e6:.3f}) мм, угол={m.angle.degrees:.1f}°")
-        print("\nВиа:")
-        for v in vias:
-            print(f"  via у {v.owner_ref}: ({v.position.x/1e6:.3f}, {v.position.y/1e6:.3f}) мм")
+        print("\nВиа: не показаны в dry-run — их позиции (особенно GND via) "
+              "зависят от РЕАЛЬНОГО положения компонентов после применения "
+              "перемещений, которого в dry-run ещё не произошло. "
+              "Запустите без --dry-run для точного предпросмотра.")
         return
 
-    logger.info("Применение изменений...")
     executor = BatchExecutor(adapter, cfg, batch_size=args.batch_size)
-    failed_refs, failed_vias = executor.execute(
-            moves, vias,
-            check_collisions=not args.no_collision_check,
-            collision_margin_mm=args.collision_margin
-        )
 
+    # --- Фаза 1: перемещения ---
+    moves = planner.plan_moves()
+    logger.info(f"Запланировано перемещений: {len(moves)}")
+    logger.info("Применение перемещений...")
+    failed_refs = executor.execute_moves(
+        moves,
+        check_collisions=not args.no_collision_check,
+        collision_margin_mm=args.collision_margin,
+    )
     if failed_refs:
         logger.warning(f"Не удалось переместить: {sorted(set(failed_refs))}")
+
+    # --- Перечитываем плату: GND via планируется по РЕАЛЬНЫМ, уже
+    # закоммиченным позициям компонентов, а не по расчётным "на бумаге" ---
+    logger.info("Обновление данных платы перед планированием виа...")
+    adapter.refresh_board()
+
+    # --- Фаза 2: виа ---
+    vias = planner.plan_vias()
+    logger.info(f"Запланировано виа: {len(vias)}")
+    logger.info("Применение виа...")
+    failed_vias = executor.execute_vias(vias)
     if failed_vias:
         logger.warning(f"Не удалось создать виа рядом с: {sorted(set(failed_vias))}")
+
     if not failed_refs and not failed_vias:
         logger.info("✅ Все операции выполнены успешно")
     else:
         logger.warning("⚠️ Некоторые операции завершились с ошибками – проверьте лог.")
 
 
-def cmd_generate(args):
-    """Команда генерации правил."""
+def cmd_undo(args):
+    """Откатывает последнюю операцию."""
     logger = logging.getLogger(__name__)
-    logger.info(f"Генерация правил для {args.target} из {args.net} и {args.pcb}")
-    generator = RulesGenerator(
-        net_path=args.net,
-        pcb_path=args.pcb,
-        target_ref=args.target,
-        groups=DEFAULT_GROUPS,
-        default_100nf_offset_mm=args.nf_offset,
-        default_47uf_offset_mm=args.uf_offset,
-        repeat_fan_step_mm=args.fan_step,
-        min_pin_spacing_mm=args.min_spacing,
-    )
-    yaml_str = generator.generate_yaml()
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(yaml_str)
-        logger.info(f"Правила сохранены в {args.output}")
+    log_dir = Path("logs")
+    if not log_dir.exists():
+        logger.error("Папка logs не найдена.")
+        return
+
+    files = sorted(log_dir.glob("operation_*.json"), key=lambda p: p.stat().st_ctime)
+    if not files:
+        logger.error("Нет файлов операций для отката.")
+        return
+
+    last_file = files[-1]
+    logger.info(f"Откат операции из {last_file.name}")
+    success = undo_last_operation(last_file)
+    if success:
+        logger.info("✅ Операция успешно откатана.")
     else:
-        print(yaml_str)
+        logger.error("❌ Не удалось откатить операцию.")
 
 
 def main():
-    # Если первый аргумент не является подкомандой, подставляем 'apply'
-    if len(sys.argv) > 1 and sys.argv[1] not in ['apply', 'generate']:
+    if len(sys.argv) > 1 and sys.argv[1] not in ['apply', 'undo']:
         sys.argv.insert(1, 'apply')
 
     parser = argparse.ArgumentParser(
-        description="KiCad Decap Placer – расстановка конденсаторов и генерация правил",
+        description="KiCad Decap Placer – расстановка конденсаторов (ручная стратегия)",
         epilog="Пример: placer.py decap_placement.yaml --dry-run"
     )
     subparsers = parser.add_subparsers(dest="command", required=True, help="Подкоманда")
 
-    # Подкоманда apply
     apply_parser = subparsers.add_parser("apply", help="Применить расстановку")
     apply_parser.add_argument("config", help="YAML конфигурационный файл")
     apply_parser.add_argument("--dry-run", action="store_true", help="Только распечатать план, не применять")
@@ -137,21 +143,12 @@ def main():
     apply_parser.add_argument("--batch-size", type=int, default=10, help="Размер батча для коммитов")
     apply_parser.add_argument("--verbose", action="store_true", help="Подробный вывод")
     apply_parser.add_argument("--log-file", help="Файл для сохранения логов")
-
-    # Подкоманда generate
-    gen_parser = subparsers.add_parser("generate", help="Сгенерировать правила (YAML)")
-    gen_parser.add_argument("--net", required=True, help="Путь к .net файлу")
-    gen_parser.add_argument("--pcb", required=True, help="Путь к .kicad_pcb файлу")
-    gen_parser.add_argument("--target", default="IC1", help="Refdes целевого компонента")
-    gen_parser.add_argument("--output", "-o", help="Файл для сохранения (если не указан, печатает в stdout)")
-    gen_parser.add_argument("--100nf-offset", type=float, default=1.0, help="Отступ для 100nF (inside)")
-    gen_parser.add_argument("--47uf-offset", type=float, default=2.2, help="Отступ для 4.7uF (outside)")
-    gen_parser.add_argument("--fan-step", type=float, default=0.9, help="Шаг при повторном использовании пина")
-    gen_parser.add_argument("--min-spacing", type=float, default=2.0, help="Минимальное расстояние между пинами")
-    gen_parser.add_argument("--verbose", action="store_true", help="Подробный вывод")
-    gen_parser.add_argument("--log-file", help="Файл для сохранения логов")
     apply_parser.add_argument("--no-collision-check", action="store_true", help="Отключить проверку коллизий")
     apply_parser.add_argument("--collision-margin", type=float, default=0.2, help="Дополнительный зазор при проверке коллизий, мм")
+
+    undo_parser = subparsers.add_parser("undo", help="Откатить последнюю операцию")
+    undo_parser.add_argument("--verbose", action="store_true", help="Подробный вывод")
+    undo_parser.add_argument("--log-file", help="Файл для сохранения логов")
 
     args = parser.parse_args()
 
@@ -160,8 +157,8 @@ def main():
     try:
         if args.command == "apply":
             cmd_apply(args)
-        elif args.command == "generate":
-            cmd_generate(args)
+        elif args.command == "undo":
+            cmd_undo(args)
         else:
             parser.print_help()
             sys.exit(1)

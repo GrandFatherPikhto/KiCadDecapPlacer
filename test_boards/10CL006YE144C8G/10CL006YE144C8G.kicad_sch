@@ -4638,16 +4638,16 @@
 		(uuid "4fd05551-baf0-4e90-83f2-110924a8c728")
 	)
 	(junction
-		(at 118.11 201.93)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "50bf325a-192e-458e-b55f-5cd11de99c61")
-	)
-	(junction
 		(at 63.5 173.99)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "53093b69-9917-4423-8d9f-e0188e0c4a6a")
+	)
+	(junction
+		(at 110.49 201.93)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "56976996-bcf7-4a6b-ac79-030ecf44af12")
 	)
 	(junction
 		(at 71.12 219.71)
@@ -4860,6 +4860,12 @@
 		(uuid "a8b62425-7493-44a8-83f3-499a8d3900ca")
 	)
 	(junction
+		(at 118.11 213.36)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "aa9fd0fa-8546-4e7c-9563-17e8a5076fed")
+	)
+	(junction
 		(at 63.5 243.84)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -4870,6 +4876,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "b09156cf-5c56-4ed4-94b4-08e0eb8a614a")
+	)
+	(junction
+		(at 118.11 201.93)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "b2185da6-71a3-4250-bf56-1b550c0d49b4")
 	)
 	(junction
 		(at 87.63 185.42)
@@ -6115,6 +6127,16 @@
 	)
 	(wire
 		(pts
+			(xy 110.49 201.93) (xy 110.49 213.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "99c903c7-1c42-41f9-af59-afc9d30e96bb")
+	)
+	(wire
+		(pts
 			(xy 33.02 231.14) (xy 33.02 242.57)
 		)
 		(stroke
@@ -6445,7 +6467,7 @@
 	)
 	(wire
 		(pts
-			(xy 118.11 201.93) (xy 118.11 204.47)
+			(xy 118.11 201.93) (xy 118.11 213.36)
 		)
 		(stroke
 			(width 0)
@@ -7715,7 +7737,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "024870b6-fc23-4f4b-8c62-d49629c8f837")
-		(property "Reference" "C57"
+		(property "Reference" "C58"
 			(at 335.28 111.7599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7779,7 +7801,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C57")
+					(reference "C58")
 					(unit 1)
 				)
 			)
@@ -7864,8 +7886,8 @@
 		)
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 118.11 204.47 0)
+		(lib_id "Device:C")
+		(at 114.3 213.36 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7874,10 +7896,9 @@
 		(in_pos_files yes)
 		(dnp no)
 		(fields_autoplaced yes)
-		(uuid "0641be13-2a1c-42e2-b800-304e247bb4a9")
-		(property "Reference" "#PWR028"
-			(at 118.11 210.82 0)
-			(hide yes)
+		(uuid "0406fd3b-ea73-45a4-adcd-8829b3dfabcd")
+		(property "Reference" "C55"
+			(at 114.3 205.74 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7886,8 +7907,8 @@
 				)
 			)
 		)
-		(property "Value" "GND"
-			(at 118.11 209.55 0)
+		(property "Value" "4.7 uF"
+			(at 114.3 208.28 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7896,8 +7917,8 @@
 				)
 			)
 		)
-		(property "Footprint" ""
-			(at 118.11 204.47 0)
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder"
+			(at 118.11 212.3948 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7908,7 +7929,88 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 118.11 204.47 0)
+			(at 114.3 213.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 114.3 213.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "2"
+			(uuid "4f23c9aa-2c6f-489e-bdcc-3ba98926afe8")
+		)
+		(pin "1"
+			(uuid "2db0f5d8-4e03-49eb-ad34-9e80ace169e8")
+		)
+		(instances
+			(project "10CL006YE144C8G"
+				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
+					(reference "C55")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 118.11 213.36 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "0641be13-2a1c-42e2-b800-304e247bb4a9")
+		(property "Reference" "#PWR028"
+			(at 118.11 219.71 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 118.11 218.44 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 118.11 213.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 118.11 213.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7919,7 +8021,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 118.11 204.47 0)
+			(at 118.11 213.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8833,7 +8935,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "1b8db370-c6c2-444f-9f20-5d4e5b0a8592")
-		(property "Reference" "C55"
+		(property "Reference" "C56"
 			(at 308.61 111.7599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8897,7 +8999,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C55")
+					(reference "C56")
 					(unit 1)
 				)
 			)
@@ -9391,7 +9493,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "2d69b1d7-95b1-4f6b-9f4d-5ab9bdcd3dd1")
-		(property "Reference" "C60"
+		(property "Reference" "C61"
 			(at 354.33 34.2899 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9455,7 +9557,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C60")
+					(reference "C61")
 					(unit 1)
 				)
 			)
@@ -9711,7 +9813,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "31d12f85-978c-4b31-8ae5-afbf7ffd20a7")
-		(property "Reference" "C59"
+		(property "Reference" "C60"
 			(at 346.71 111.7599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9775,7 +9877,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C59")
+					(reference "C60")
 					(unit 1)
 				)
 			)
@@ -12527,7 +12629,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "77f469c7-b283-4a46-abbc-20ab562b5cc7")
-		(property "Reference" "C61"
+		(property "Reference" "C62"
 			(at 368.3 34.2899 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12591,7 +12693,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C61")
+					(reference "C62")
 					(unit 1)
 				)
 			)
@@ -16399,7 +16501,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "c94075ca-dcf8-447d-9842-b44f88e70fee")
-		(property "Reference" "C62"
+		(property "Reference" "C63"
 			(at 381 34.2899 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -16463,7 +16565,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C62")
+					(reference "C63")
 					(unit 1)
 				)
 			)
@@ -16795,7 +16897,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "d6acae30-988e-489c-8383-d2d6ec7b674a")
-		(property "Reference" "C58"
+		(property "Reference" "C59"
 			(at 342.9 34.2899 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -16859,7 +16961,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C58")
+					(reference "C59")
 					(unit 1)
 				)
 			)
@@ -17829,7 +17931,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "f6772dc0-53e8-47a4-bdde-005ce7228f00")
-		(property "Reference" "C56"
+		(property "Reference" "C57"
 			(at 320.04 111.7599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -17893,7 +17995,7 @@
 		(instances
 			(project "10CL006YE144C8G"
 				(path "/b57dfc4b-223a-4e5f-9b77-fe2738f000ca"
-					(reference "C56")
+					(reference "C57")
 					(unit 1)
 				)
 			)
