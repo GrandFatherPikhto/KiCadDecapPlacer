@@ -4,7 +4,7 @@ import time
 import logging
 from typing import List, Optional, Any
 import kipy
-from kipy.board_types import FootprintInstance, Zone, Net, Via, ViaType, BoardLayer, Pad
+from kipy.board_types import FootprintInstance, Zone, Net, Via, ViaType, BoardLayer, Pad, Field
 from kipy.geometry import Vector2, Box2, Angle
 
 from .interfaces import IBoardAdapter
@@ -47,6 +47,19 @@ class KiCadBoardAdapter(IBoardAdapter):
         vias = list(self._board.get_vias())
         logger.debug(f"Получено {len(vias)} виа")
         return vias
+
+    def get_field_value(self, footprint: FootprintInstance, field_name: str) -> Optional[str]:
+        """
+        Значение пользовательского поля компонента (например, роль для
+        DecapPlacer 4.0). ВАЖНО: texts_and_fields содержит вперемешку
+        настоящие Field (name+text.value) и голый BoardText (просто текст
+        на шёлкографии, без имени поля вовсе) — фильтруем по типу, иначе
+        типична ошибка AttributeError на .name у BoardText.
+        """
+        for item in footprint.texts_and_fields:
+            if isinstance(item, Field) and item.name == field_name:
+                return item.text.value if item.text else None
+        return None
 
     def get_footprint_pads(self, footprint: FootprintInstance) -> List[Pad]:
         """

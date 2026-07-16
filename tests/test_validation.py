@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Тесты на фатальные предварительные проверки (validation.py)."""
+"""Тесты на фатальные предварительные проверки (validation.py), DecapPlacer 4.0."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -7,93 +7,140 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
 from unittest.mock import MagicMock
 
-from decap_placer.config import Config, ThermalViaArrayConfig, ManualSpoke, SpokeTemplate, Rule
+from decap_placer.config import (
+    Config, ThermalViaArrayConfig, ManualSpoke, SpokeTemplate,
+    TemplateComponentSlot, Rule
+)
 from decap_placer.exceptions import ValidationError
-from decap_placer.validation import check_duplicate_component_refs, check_component_nets
+from decap_placer.validation import check_templates_and_pads_exist, check_role_pool_sufficiency
 
 
-def _cfg(rules):
+def _cfg(rules, templates=None):
     return Config(
         target_ref="IC1", side="back",
-        templates={"t": SpokeTemplate(name="t")},
+        templates=templates or {"t": SpokeTemplate(name="t", components=[
+            TemplateComponentSlot(role="HEAVY"), TemplateComponentSlot(role="LIGHT")
+        ])},
         thermal_via_array=ThermalViaArrayConfig(enabled=False),
         rules=rules,
     )
 
 
-class TestDuplicateComponentRefs:
-    def test_no_duplicates_passes_silently(self):
-        cfg = _cfg([
-            Rule(net="+3V3", spokes=[
-                ManualSpoke(pad="17", template="t", component1_ref="C5", component2_ref="C30"),
-                ManualSpoke(pad="26", template="t", component1_ref="C6", component2_ref="C31"),
-            ])
-        ])
-        check_duplicate_component_refs(cfg)  # не должно бросить исключение
-
-    def test_same_ref_in_two_different_spokes_raises(self):
-        cfg = _cfg([
-            Rule(net="+3V3", spokes=[
-                ManualSpoke(pad="17", template="t", component1_ref="C5"),
-                ManualSpoke(pad="26", template="t", component1_ref="C5"),  # C5 повторно!
-            ])
-        ])
-        with pytest.raises(ValidationError, match="C5"):
-            check_duplicate_component_refs(cfg)
-
-    def test_same_ref_in_same_spoke_both_roles_raises(self):
-        """Один и тот же ref по ошибке указан и как component1, и как component2 одной спицы."""
-        cfg = _cfg([
-            Rule(net="+3V3", spokes=[
-                ManualSpoke(pad="17", template="t", component1_ref="C5", component2_ref="C5"),
-            ])
-        ])
-        with pytest.raises(ValidationError, match="C5"):
-            check_duplicate_component_refs(cfg)
-
-    def test_duplicate_across_different_rules_raises(self):
-        cfg = _cfg([
-            Rule(net="+3V3", spokes=[ManualSpoke(pad="17", template="t", component1_ref="C5")]),
-            Rule(net="+1V2", spokes=[ManualSpoke(pad="40", template="t", component1_ref="C5")]),
-        ])
-        with pytest.raises(ValidationError):
-            check_duplicate_component_refs(cfg)
+def _make_pad(number):
+    pad = MagicMock()
+    pad.number = number
+    return pad
 
 
-class TestComponentNets:
-    def _adapter_with_component(self, ref, nets):
-        fp = MagicMock()
-        pads = []
-        for net_name in nets:
-            pad = MagicMock()
-            pad.net.name = net_name
-            pads.append(pad)
-        adapter = MagicMock()
-        adapter.get_footprint.side_effect = lambda r: fp if r == ref else None
-        adapter.get_footprint_pads.return_value = pads
-        return adapter
+def _adapter_with_pads(pad_numbers):
+    ic1 = MagicMock()
+    adapter = MagicMock()
+    adapter.get_footprint.side_effect = lambda ref: ic1 if ref == "IC1" else None
+    pads = {n: _make_pad(n) for n in pad_numbers}
+    adapter.get_pad_by_number.side_effect = lambda fp, num: pads.get(num)
+    return adapter
 
-    def test_component_on_correct_net_passes(self):
-        cfg = _cfg([Rule(net="+3V3_VCCIO", spokes=[
-            ManualSpoke(pad="17", template="t", component1_ref="C5")
-        ])])
-        adapter = self._adapter_with_component("C5", ["+3V3_VCCIO", "GND"])
-        check_component_nets(adapter, cfg)  # не должно бросить
 
-    def test_component_on_wrong_net_raises(self):
-        """C5 реально сидит на +1V2_VCCINT, а конфиг требует +3V3_VCCIO -- явная опечатка в ref."""
-        cfg = _cfg([Rule(net="+3V3_VCCIO", spokes=[
-            ManualSpoke(pad="17", template="t", component1_ref="C5")
-        ])])
-        adapter = self._adapter_with_component("C5", ["+1V2_VCCINT", "GND"])
-        with pytest.raises(ValidationError, match="C5"):
-            check_component_nets(adapter, cfg)
+class TestTemplatesAndPadsExist:
+    def test_valid_config_passes(self):
+        cfg = _cfg([Rule(net="+3V3", spokes=[ManualSpoke(pad="17", template="t")])])
+        adapter = _adapter_with_pads(["17"])
+        check_templates_and_pads_exist(adapter, cfg)  # не должно бросить
 
-    def test_component_not_found_raises(self):
-        cfg = _cfg([Rule(net="+3V3_VCCIO", spokes=[
-            ManualSpoke(pad="17", template="t", component1_ref="C999")
-        ])])
+    def test_unknown_template_raises(self):
+        cfg = _cfg([Rule(net="+3V3", spokes=[ManualSpoke(pad="17", template="does_not_exist")])])
+        adapter = _adapter_with_pads(["17"])
+        with pytest.raises(ValidationError, match="does_not_exist"):
+            check_templates_and_pads_exist(adapter, cfg)
+
+    def test_unknown_pad_raises(self):
+        cfg = _cfg([Rule(net="+3V3", spokes=[ManualSpoke(pad="999", template="t")])])
+        adapter = _adapter_with_pads(["17"])  # 999 не существует
+        with pytest.raises(ValidationError, match="999"):
+            check_templates_and_pads_exist(adapter, cfg)
+
+    def test_target_ref_not_found_raises(self):
+        cfg = _cfg([Rule(net="+3V3", spokes=[ManualSpoke(pad="17", template="t")])])
         adapter = MagicMock()
         adapter.get_footprint.return_value = None
-        with pytest.raises(ValidationError, match="C999"):
-            check_component_nets(adapter, cfg)
+        with pytest.raises(ValidationError, match="IC1"):
+            check_templates_and_pads_exist(adapter, cfg)
+
+    def test_disabled_spoke_not_checked(self):
+        """Выключенная спица (enabled=False) не должна проверяться вовсе."""
+        cfg = _cfg([Rule(net="+3V3", spokes=[
+            ManualSpoke(pad="999", template="does_not_exist", enabled=False)
+        ])])
+        adapter = _adapter_with_pads(["17"])
+        check_templates_and_pads_exist(adapter, cfg)  # не должно бросить -- спица выключена
+
+
+class TestRolePoolSufficiency:
+    def _adapter_with_pool(self, components):
+        """components: список (ref, role, net_name)."""
+        fps = []
+        for ref, role, net_name in components:
+            fp = MagicMock()
+            fp.reference_field.text.value = ref
+            pad = MagicMock()
+            pad.net.name = net_name
+            fp._pads = [pad]
+            fp._role = role
+            fps.append(fp)
+        adapter = MagicMock()
+        adapter.get_footprints.return_value = fps
+        adapter.get_field_value.side_effect = lambda fp, name: fp._role
+        adapter.get_footprint_pads.side_effect = lambda fp: fp._pads
+        return adapter
+
+    def test_sufficient_pool_passes(self):
+        cfg = _cfg([Rule(net="+3V3", spokes=[
+            ManualSpoke(pad="17", template="t"),
+            ManualSpoke(pad="26", template="t"),
+        ])])
+        # Нужно 2 HEAVY + 2 LIGHT -- ровно столько и есть
+        adapter = self._adapter_with_pool([
+            ("C5", "LIGHT", "+3V3"), ("C6", "LIGHT", "+3V3"),
+            ("C30", "HEAVY", "+3V3"), ("C31", "HEAVY", "+3V3"),
+        ])
+        check_role_pool_sufficiency(adapter, cfg)  # не должно бросить
+
+    def test_insufficient_pool_raises_with_exact_counts(self):
+        cfg = _cfg([Rule(net="+3V3", spokes=[
+            ManualSpoke(pad="17", template="t"),
+            ManualSpoke(pad="26", template="t"),
+        ])])
+        # Нужно 2 HEAVY, есть только 1
+        adapter = self._adapter_with_pool([
+            ("C5", "LIGHT", "+3V3"), ("C6", "LIGHT", "+3V3"),
+            ("C30", "HEAVY", "+3V3"),
+        ])
+        with pytest.raises(ValidationError, match="HEAVY"):
+            check_role_pool_sufficiency(adapter, cfg)
+
+    def test_wrong_net_component_not_counted(self):
+        """Компонент с нужной ролью, но НЕ на той цепи -- не должен засчитываться."""
+        cfg = _cfg([Rule(net="+3V3", spokes=[ManualSpoke(pad="17", template="t")])])
+        adapter = self._adapter_with_pool([
+            ("C5", "LIGHT", "+3V3"),
+            ("C30", "HEAVY", "+1V2_VCCINT"),  # HEAVY, но не на +3V3!
+        ])
+        with pytest.raises(ValidationError, match="HEAVY"):
+            check_role_pool_sufficiency(adapter, cfg)
+
+    def test_multiple_rules_checked_independently(self):
+        """Нехватка на одном правиле не должна маскироваться избытком на другом."""
+        template = SpokeTemplate(name="t", components=[TemplateComponentSlot(role="HEAVY")])
+        cfg = _cfg(
+            [
+                Rule(net="+3V3", spokes=[ManualSpoke(pad="17", template="t")]),
+                Rule(net="+1V2", spokes=[ManualSpoke(pad="40", template="t")]),
+            ],
+            templates={"t": template},
+        )
+        adapter = self._adapter_with_pool([
+            ("C30", "HEAVY", "+3V3"), ("C31", "HEAVY", "+3V3"),  # с запасом на +3V3
+            # на +1V2 -- вообще ни одного HEAVY
+        ])
+        with pytest.raises(ValidationError, match="\\+1V2"):
+            check_role_pool_sufficiency(adapter, cfg)

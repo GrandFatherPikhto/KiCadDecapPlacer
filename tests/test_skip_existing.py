@@ -36,9 +36,9 @@ class TestSkipExistingComponents:
     def _cfg(self, skip: bool):
         template = SpokeTemplate(
             name="t",
-            component1=TemplateComponentSlot(offset_along_mm=1.0, offset_across_mm=0.0, angle_deg=0.0),
+            components=[TemplateComponentSlot(role="SOLO", offset_along_mm=1.0, offset_across_mm=0.0, angle_deg=0.0)],
         )
-        spoke = ManualSpoke(pad="17", template="t", rotation_deg=0.0, component1_ref="C5")
+        spoke = ManualSpoke(pad="17", template="t", rotation_deg=0.0)
         return Config(
             target_ref="IC1", side="back",
             templates={"t": template},
@@ -53,6 +53,22 @@ class TestSkipExistingComponents:
         fp.definition.items = [_make_pad("17", 50.0, 50.0, "+3V3")]
         return fp
 
+    def _setup_adapter(self, ic1, c5):
+        """C5 помечен ролью SOLO и сидит на цепи +3V3 -- пул его находит."""
+        c5.reference_field.text.value = "C5"
+        c5_pad = MagicMock(); c5_pad.net.name = "+3V3"
+        c5.definition.items = [c5_pad]
+
+        adapter = MagicMock()
+        adapter.get_footprint.side_effect = lambda ref: ic1 if ref == "IC1" else (c5 if ref == "C5" else None)
+        adapter.get_footprints.return_value = [ic1, c5]
+        adapter.get_pad_by_number.side_effect = lambda fp, num: next(
+            (p for p in fp.definition.items if p.number == num), None
+        )
+        adapter.get_footprint_pads.side_effect = lambda fp: list(fp.definition.items)
+        adapter.get_field_value.side_effect = lambda fp, name: "SOLO" if fp is c5 else None
+        return adapter
+
     def test_skips_move_when_component_already_in_place(self):
         cfg = self._cfg(skip=True)
         ic1 = self._ic1()
@@ -63,11 +79,7 @@ class TestSkipExistingComponents:
         c5.orientation = Angle.from_degrees(0.0)
         c5.layer = BoardLayer.BL_B_Cu
 
-        adapter = MagicMock()
-        adapter.get_footprint.side_effect = lambda ref: ic1 if ref == "IC1" else (c5 if ref == "C5" else None)
-        adapter.get_pad_by_number.side_effect = lambda fp, num: next(
-            (p for p in fp.definition.items if p.number == num), None
-        )
+        adapter = self._setup_adapter(ic1, c5)
         planner = PlacementPlanner(adapter, cfg)
         moves = planner.plan_moves()
         assert len(moves) == 0, "компонент уже на месте -- перемещение не должно планироваться"
@@ -80,11 +92,7 @@ class TestSkipExistingComponents:
         c5.orientation = Angle.from_degrees(0.0)
         c5.layer = BoardLayer.BL_B_Cu
 
-        adapter = MagicMock()
-        adapter.get_footprint.side_effect = lambda ref: ic1 if ref == "IC1" else (c5 if ref == "C5" else None)
-        adapter.get_pad_by_number.side_effect = lambda fp, num: next(
-            (p for p in fp.definition.items if p.number == num), None
-        )
+        adapter = self._setup_adapter(ic1, c5)
         planner = PlacementPlanner(adapter, cfg)
         moves = planner.plan_moves()
         assert len(moves) == 1, "skip_existing_components=False -- перемещение должно планироваться как обычно"
@@ -98,11 +106,7 @@ class TestSkipExistingComponents:
         c5.orientation = Angle.from_degrees(0.0)
         c5.layer = BoardLayer.BL_B_Cu
 
-        adapter = MagicMock()
-        adapter.get_footprint.side_effect = lambda ref: ic1 if ref == "IC1" else (c5 if ref == "C5" else None)
-        adapter.get_pad_by_number.side_effect = lambda fp, num: next(
-            (p for p in fp.definition.items if p.number == num), None
-        )
+        adapter = self._setup_adapter(ic1, c5)
         planner = PlacementPlanner(adapter, cfg)
         moves = planner.plan_moves()
         assert len(moves) == 1, "компонент НЕ на целевой позиции -- перемещение должно планироваться"

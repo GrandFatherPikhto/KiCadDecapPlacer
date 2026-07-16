@@ -4,12 +4,20 @@ validation.py — фатальные предварительные провер
 планирования и любых изменений на плате. При обнаружении проблемы —
 ValidationError с понятным, собранным сразу по всем найденным проблемам
 сообщением (не одна ошибка за прогон, а полный список).
+
+ИЗМЕНЕНО (DecapPlacer 4.0): раньше проверялись явные ref в конфиге
+(component1_ref/component2_ref) — их больше нет, компоненты подбираются
+из ComponentPool по (реальная цепь, роль). Основная защита теперь встроена
+в сам ComponentPool.pop() (фатально при нехватке), но здесь — тот же самый
+подсчёт делается ЗАРАНЕЕ, чтобы увидеть все нехватки сразу, а не
+останавливаться на первой попавшейся спице.
 """
 import logging
-from typing import List
+from typing import List, Dict
 from .config import Config
 from .kicad.adapter import KiCadBoardAdapter
 from .exceptions import ValidationError
+from .placement.services.component_pool import ComponentPool
 
 logger = logging.getLogger(__name__)
 
@@ -29,71 +37,82 @@ def _format_fatal(title: str, problems: List[str]) -> str:
     return "\n".join(lines)
 
 
-def check_duplicate_component_refs(cfg: Config) -> None:
+def check_templates_and_pads_exist(adapter: KiCadBoardAdapter, cfg: Config) -> None:
     """
-    Один и тот же ref компонента не должен встречаться в конфиге дважды
-    (как component1/component2 любой спицы) — иначе он будет перемещён
-    (и получит виа) более одного раза, причём итоговый результат зависит
-    от порядка обработки спиц, что практически гарантированно даст не то,
-    что ожидалось. Не требует живого KiCad — чистая проверка конфига.
+    Каждая спица должна ссылаться на существующий шаблон и существующую
+    площадку целевого компонента — иначе спица просто тихо пропускается
+    (было бы легко не заметить опечатку в имени шаблона/номере пада).
     """
-    seen = {}  # ref -> (net, pad, роль) первого вхождения
     problems = []
+    target_fp = adapter.get_footprint(cfg.target_ref)
+    if target_fp is None:
+        raise ValidationError(_format_fatal(
+            "целевой компонент не найден",
+            [f"{cfg.target_ref!r} не найден на плате — проверьте target_ref в конфиге"]
+        ))
 
     for rule in cfg.rules:
         for spoke in rule.spokes:
-            for role, ref in (("component1", spoke.component1_ref), ("component2", spoke.component2_ref)):
-                if ref is None:
-                    continue
-                if ref in seen:
-                    prev_net, prev_pad, prev_role = seen[ref]
-                    problems.append(
-                        f"{ref} используется дважды: "
-                        f"[{prev_net} / пад {prev_pad} / {prev_role}] и "
-                        f"[{rule.net} / пад {spoke.pad} / {role}]"
-                    )
-                else:
-                    seen[ref] = (rule.net, spoke.pad, role)
+            if not spoke.enabled:
+                continue
+            if spoke.template not in cfg.templates:
+                problems.append(
+                    f"спица (пад {spoke.pad}, цепь {rule.net!r}): "
+                    f"шаблон {spoke.template!r} не найден в templates"
+                )
+                continue
+            pad = adapter.get_pad_by_number(target_fp, spoke.pad)
+            if pad is None:
+                problems.append(
+                    f"спица (шаблон {spoke.template!r}, цепь {rule.net!r}): "
+                    f"у {cfg.target_ref} нет площадки {spoke.pad!r}"
+                )
 
     if problems:
-        raise ValidationError(_format_fatal("компонент используется более одного раза", problems))
-    logger.debug(f"Проверка дубликатов: {len(seen)} уникальных компонентов, повторов не найдено")
+        raise ValidationError(_format_fatal("спица ссылается на несуществующий шаблон или площадку", problems))
+    logger.debug("Проверка шаблонов/падов спиц: все ссылки корректны")
 
 
-def check_component_nets(adapter: KiCadBoardAdapter, cfg: Config) -> None:
+def check_role_pool_sufficiency(adapter: KiCadBoardAdapter, cfg: Config) -> None:
     """
-    Каждый компонент спицы должен иметь площадку, реально подключённую к
-    цепи rule.net (не только к GND) — иначе, скорее всего, в конфиге
-    перепутан ref (например, вписан конденсатор с соседней цепи питания).
-    Требует живой платы — сверяет с РЕАЛЬНЫМИ цепями компонента.
+    Для каждой цепи правила заранее считает, сколько компонентов каждой
+    роли требуется всеми её спицами, и сверяет с реальным количеством
+    компонентов на плате (та же цепь + поле Role) — фатально и со списком
+    всех нехваток разом, если не сходится хоть где-то.
     """
     problems = []
 
     for rule in cfg.rules:
+        needed_counts: Dict[str, int] = {}
         for spoke in rule.spokes:
-            for ref in (spoke.component1_ref, spoke.component2_ref):
-                if ref is None:
-                    continue
-                fp = adapter.get_footprint(ref)
-                if fp is None:
-                    problems.append(f"{ref}: компонент не найден на плате (пад {spoke.pad}, цепь {rule.net})")
-                    continue
-                pads = adapter.get_footprint_pads(fp)
-                nets_on_component = sorted({p.net.name for p in pads if p.net and p.net.name})
-                if rule.net not in nets_on_component:
-                    problems.append(
-                        f"{ref}: подключён к {nets_on_component or ['(нет цепей)']}, "
-                        f"но спица на паде {spoke.pad} требует {rule.net!r}"
-                    )
+            if not spoke.enabled:
+                continue
+            template = cfg.templates.get(spoke.template)
+            if template is None:
+                continue  # уже поймано check_templates_and_pads_exist
+            for slot in template.components:
+                needed_counts[slot.role] = needed_counts.get(slot.role, 0) + 1
+
+        if not needed_counts:
+            continue
+
+        pool = ComponentPool(adapter, rule.net, roles=sorted(needed_counts.keys()))
+        for role, needed in needed_counts.items():
+            available = pool.remaining_count(role)
+            if available < needed:
+                problems.append(
+                    f"цепь {rule.net!r}, роль {role!r}: нужно {needed}, найдено {available} "
+                    f"(проверьте поле Role в схеме и реальное подключение к цепи)"
+                )
 
     if problems:
-        raise ValidationError(_format_fatal("конденсатор не на той цепи", problems))
-    logger.debug("Проверка цепей компонентов: все совпадают с ожидаемыми")
+        raise ValidationError(_format_fatal("не хватает компонентов для ролей шаблона", problems))
+    logger.debug("Проверка достаточности пулов по ролям: всё сходится")
 
 
 def run_all_checks(adapter: KiCadBoardAdapter, cfg: Config) -> None:
-    """Запускает все проверки по порядку — сначала дешёвые (без платы), потом требующие живого борта."""
+    """Запускает все проверки по порядку — от дешёвых к более полным."""
     logger.info("Предварительные проверки конфигурации...")
-    check_duplicate_component_refs(cfg)
-    check_component_nets(adapter, cfg)
+    check_templates_and_pads_exist(adapter, cfg)
+    check_role_pool_sufficiency(adapter, cfg)
     logger.info("Все предварительные проверки пройдены")

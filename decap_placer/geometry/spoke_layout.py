@@ -18,8 +18,8 @@ spoke_layout.py — разворачивает шаблон спицы в абс
 (kipy.geometry.Vector2.rotate(), эмпирически подтверждённую ранее для
 конвенции флипа) — не переизобретает вращение самостоятельно.
 """
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict
 from kipy.geometry import Vector2, Angle
 
 from ..config import ManualSpoke, SpokeTemplate
@@ -46,6 +46,7 @@ def local_to_absolute(origin: Vector2, along_mm: float, across_mm: float, rotati
 @dataclass
 class ComponentLayout:
     ref: str
+    role: str
     position: Vector2
     angle_deg: float
     gnd_via_offset_along_mm: float
@@ -62,8 +63,7 @@ class SpokeLayout:
     power_via_net: Optional[str] = None
     power_via_drill_mm: Optional[float] = None
     power_via_diameter_mm: Optional[float] = None
-    component1: Optional[ComponentLayout] = None
-    component2: Optional[ComponentLayout] = None
+    components: List[ComponentLayout] = field(default_factory=list)
 
 
 def apply_spoke_geometry(
@@ -71,13 +71,18 @@ def apply_spoke_geometry(
     spoke: ManualSpoke,
     template: SpokeTemplate,
     rule_net: str,
+    role_to_ref: Dict[str, str],
 ) -> SpokeLayout:
     """
     Считает абсолютные позиции всего, что есть в шаблоне для данной
-    спицы. НЕ включает позиции GND via компонентов — они привязаны к
-    РЕАЛЬНОМУ земляному паду компонента после того, как он реально
-    размещён (см. geometry/pad_projection.py, используется на следующем
-    шаге, в via_planner) — здесь только геометрия, известная заранее.
+    спицы. role_to_ref — уже разрешённое СНАРУЖИ (см. component_pool.py)
+    сопоставление роль->ref для этой конкретной спицы; эта функция сама
+    не решает, какой ref взять на какую роль — только геометрия.
+
+    НЕ включает позиции GND via компонентов — они привязаны к РЕАЛЬНОМУ
+    земляному паду компонента после того, как он реально размещён (см.
+    geometry/pad_projection.py, используется в via_planner) — здесь
+    только геометрия, известная заранее.
     """
     origin = Vector2.from_xy(
         pad_position.x + int(spoke.shift_x_mm * MM),
@@ -94,30 +99,20 @@ def apply_spoke_geometry(
         layout.power_via_drill_mm = pv.drill_mm
         layout.power_via_diameter_mm = pv.diameter_mm
 
-    if template.component1 is not None and spoke.component1_ref:
-        c = template.component1
-        layout.component1 = ComponentLayout(
-            ref=spoke.component1_ref,
-            position=local_to_absolute(origin, c.offset_along_mm, c.offset_across_mm, spoke.rotation_deg),
-            angle_deg=c.angle_deg + spoke.rotation_deg,
-            gnd_via_offset_along_mm=c.gnd_via_offset_along_mm,
-            gnd_via_offset_across_mm=c.gnd_via_offset_across_mm,
-            gnd_via_net=c.gnd_via_net,
-            gnd_via_drill_mm=c.gnd_via_drill_mm,
-            gnd_via_diameter_mm=c.gnd_via_diameter_mm,
-        )
-
-    if template.component2 is not None and spoke.component2_ref:
-        c = template.component2
-        layout.component2 = ComponentLayout(
-            ref=spoke.component2_ref,
-            position=local_to_absolute(origin, c.offset_along_mm, c.offset_across_mm, spoke.rotation_deg),
-            angle_deg=c.angle_deg + spoke.rotation_deg,
-            gnd_via_offset_along_mm=c.gnd_via_offset_along_mm,
-            gnd_via_offset_across_mm=c.gnd_via_offset_across_mm,
-            gnd_via_net=c.gnd_via_net,
-            gnd_via_drill_mm=c.gnd_via_drill_mm,
-            gnd_via_diameter_mm=c.gnd_via_diameter_mm,
-        )
+    for slot in template.components:
+        ref = role_to_ref.get(slot.role)
+        if ref is None:
+            continue
+        layout.components.append(ComponentLayout(
+            ref=ref,
+            role=slot.role,
+            position=local_to_absolute(origin, slot.offset_along_mm, slot.offset_across_mm, spoke.rotation_deg),
+            angle_deg=slot.angle_deg + spoke.rotation_deg,
+            gnd_via_offset_along_mm=slot.gnd_via_offset_along_mm,
+            gnd_via_offset_across_mm=slot.gnd_via_offset_across_mm,
+            gnd_via_net=slot.gnd_via_net,
+            gnd_via_drill_mm=slot.gnd_via_drill_mm,
+            gnd_via_diameter_mm=slot.gnd_via_diameter_mm,
+        ))
 
     return layout

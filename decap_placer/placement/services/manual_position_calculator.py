@@ -8,6 +8,7 @@ from ...config import Config, Rule
 from ...kicad.adapter import KiCadBoardAdapter
 from ...geometry.spoke_layout import apply_spoke_geometry
 from ..commands import PlacedComponentInfo
+from .component_pool import ComponentPool
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,11 @@ class ManualPositionCalculator:
     geometry/spoke_layout.py). Геометрия зоны (boundary_polygon) больше не
     нужна вообще — позиция полностью определяется pad + spoke.shift/
     rotation + содержимое шаблона.
+
+    Конкретные ref компонентов НЕ читаются из конфига — подбираются из
+    ComponentPool (по реальной цепи правила + пользовательскому полю
+    Role), один пул на правило, разбираемый по очереди при обработке его
+    спиц в порядке следования в YAML.
     """
 
     def __init__(self, adapter: KiCadBoardAdapter, config: Config):
@@ -32,6 +38,19 @@ class ManualPositionCalculator:
     ) -> List[PlacedComponentInfo]:
         result = []
         for rule in rules:
+            # Собираем ВСЕ роли, нужные хоть одной спице этого правила --
+            # пул строится один раз на всё правило, не на каждую спицу.
+            roles_needed = set()
+            for spoke in rule.spokes:
+                if not spoke.enabled:
+                    continue
+                template = self.cfg.templates.get(spoke.template)
+                if template is None:
+                    continue
+                roles_needed.update(slot.role for slot in template.components)
+
+            pool = ComponentPool(self.adapter, rule.net, roles=sorted(roles_needed))
+
             for spoke in rule.spokes:
                 if not spoke.enabled:
                     continue
@@ -47,11 +66,14 @@ class ManualPositionCalculator:
                                    f"спица пропущена")
                     continue
 
-                layout = apply_spoke_geometry(pad.position, spoke, template, rule.net)
+                # Разбираем пул по ролям, нужным ИМЕННО этому шаблону --
+                # ValidationError из pool.pop() фатально всплывёт наружу,
+                # если на какую-то роль не хватило компонентов.
+                role_to_ref = {slot.role: pool.pop(slot.role, spoke.pad) for slot in template.components}
 
-                for comp_layout in (layout.component1, layout.component2):
-                    if comp_layout is None:
-                        continue
+                layout = apply_spoke_geometry(pad.position, spoke, template, rule.net, role_to_ref)
+
+                for comp_layout in layout.components:
                     result.append(PlacedComponentInfo(
                         ref=comp_layout.ref,
                         dest=comp_layout.position,
@@ -64,7 +86,8 @@ class ManualPositionCalculator:
                         gnd_via_diameter_mm=comp_layout.gnd_via_diameter_mm,
                     ))
                     logger.debug(
-                        f"  {comp_layout.ref}: позиция ({comp_layout.position.x/1e6:.3f}, "
-                        f"{comp_layout.position.y/1e6:.3f}) мм, угол {comp_layout.angle_deg:.1f}°"
+                        f"  {comp_layout.ref} (роль {comp_layout.role}, пад {spoke.pad}): "
+                        f"позиция ({comp_layout.position.x/1e6:.3f}, {comp_layout.position.y/1e6:.3f}) мм, "
+                        f"угол {comp_layout.angle_deg:.1f}°"
                     )
         return result

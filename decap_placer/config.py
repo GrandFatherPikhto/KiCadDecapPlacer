@@ -41,12 +41,16 @@ class TemplatePowerVia:
 @dataclass
 class TemplateComponentSlot:
     """
-    Один компонент-слот в шаблоне ('тонкий'/'лёгкий' или 'толстый'/'тяжёлый'
-    конденсатор — роль, не конкретный ref; конкретный ref подставляется на
-    этапе расстановки спицы). Координаты локальные (along/across).
-    GND via этого слота — координаты от СОБСТВЕННОГО земляного пада этого
-    компонента (не от нуля шаблона), но в той же повёрнутой оси.
+    Один компонент-слот в шаблоне — роль ('HEAVY'/'LIGHT'/'XTAL'/
+    'LOAD_CAP_1' и т.д.), а не конкретный ref. Конкретный ref подбирается
+    на этапе расстановки из пула компонентов платы: все футпринты, чей
+    РЕАЛЬНЫЙ пад сидит на цепи правила (rule.net) и у кого пользовательское
+    поле Role (см. validation/component_pool.py) совпадает с этой ролью.
+    Координаты локальные (along/across). GND via этого слота — координаты
+    от СОБСТВЕННОГО земляного пада этого компонента (не от нуля шаблона),
+    но в той же повёрнутой оси.
     """
+    role: str
     offset_along_mm: float = 0.0
     offset_across_mm: float = 0.0
     angle_deg: float = 0.0
@@ -63,13 +67,12 @@ class SpokeTemplate:
     Шаблон спицы — вся геометрия локальная и поворотоинвариантная:
     описывается один раз при rotation_deg=0 (условный эталонный борт),
     дальше конкретная спица поворачивает его целиком на свой угол.
-    Любой из трёх элементов может отсутствовать (None) — например, спица
-    без power via, или только с одним компонентом.
+    Любой из элементов может отсутствовать/быть пустым — например, спица
+    без power via, или шаблон всего с одним компонентом.
     """
     name: str
     power_via: Optional[TemplatePowerVia] = None
-    component1: Optional[TemplateComponentSlot] = None
-    component2: Optional[TemplateComponentSlot] = None
+    components: List[TemplateComponentSlot] = field(default_factory=list)
 
 
 @dataclass
@@ -80,14 +83,18 @@ class ManualSpoke:
     подбираются глазами под конкретный борт. Порядок применения: сначала
     сдвиг (shift_x, shift_y) от центра пада к нулю спицы, затем поворот
     получившегося нуля (и всего содержимого шаблона) на rotation_deg.
+
+    ВАЖНО: никаких ref компонентов здесь больше нет — конкретные
+    компоненты подбираются автоматически из пула (см.
+    placement/services/component_pool.py) по совпадению реальной цепи
+    (rule.net) и пользовательского поля Role на компоненте, в порядке
+    следования спиц в этом списке.
     """
     pad: str
     template: str
     shift_x_mm: float = 0.0
     shift_y_mm: float = 0.0
     rotation_deg: float = 0.0
-    component1_ref: Optional[str] = None
-    component2_ref: Optional[str] = None
     enabled: bool = True
 
 
@@ -127,10 +134,9 @@ def _load_template_power_via(data: Optional[Dict[str, Any]]) -> Optional[Templat
     )
 
 
-def _load_template_component_slot(data: Optional[Dict[str, Any]]) -> Optional[TemplateComponentSlot]:
-    if not data:
-        return None
+def _load_template_component_slot(data: Dict[str, Any]) -> TemplateComponentSlot:
     return TemplateComponentSlot(
+        role=data['role'],
         offset_along_mm=data.get('offset_along_mm', 0.0),
         offset_across_mm=data.get('offset_across_mm', 0.0),
         angle_deg=data.get('angle_deg', 0.0),
@@ -146,8 +152,7 @@ def _load_spoke_template(name: str, data: Dict[str, Any]) -> SpokeTemplate:
     return SpokeTemplate(
         name=name,
         power_via=_load_template_power_via(data.get('power_via')),
-        component1=_load_template_component_slot(data.get('component1')),
-        component2=_load_template_component_slot(data.get('component2')),
+        components=[_load_template_component_slot(c) for c in data.get('components', [])],
     )
 
 
@@ -158,8 +163,6 @@ def _load_manual_spoke(data: Dict[str, Any]) -> ManualSpoke:
         shift_x_mm=data.get('shift_x_mm', 0.0),
         shift_y_mm=data.get('shift_y_mm', 0.0),
         rotation_deg=data.get('rotation_deg', 0.0),
-        component1_ref=data.get('component1'),
-        component2_ref=data.get('component2'),
         enabled=data.get('enabled', True),
     )
 

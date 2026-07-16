@@ -88,7 +88,7 @@ class ViaPlanner:
                     logger.warning(f"Power via: у {self.cfg.target_ref} нет площадки {spoke.pad}")
                     continue
 
-                layout = apply_spoke_geometry(pad.position, spoke, template, rule.net)
+                layout = apply_spoke_geometry(pad.position, spoke, template, rule.net, role_to_ref={})
                 if layout.power_via_pos is None:
                     continue
 

@@ -41,13 +41,14 @@ def _make_pad(number, x_mm, y_mm, net_name):
 def test_plan_vias_sees_moved_component_after_refresh():
     template = SpokeTemplate(
         name="t",
-        component1=TemplateComponentSlot(
+        components=[TemplateComponentSlot(
+            role="LIGHT",
             offset_along_mm=1.0, offset_across_mm=0.0, angle_deg=0.0,
             gnd_via_offset_along_mm=0.0, gnd_via_offset_across_mm=0.5,
             gnd_via_net="GND",
-        ),
+        )],
     )
-    spoke = ManualSpoke(pad="17", template="t", rotation_deg=0.0, component1_ref="C5")
+    spoke = ManualSpoke(pad="17", template="t", rotation_deg=0.0)
     cfg = Config(
         target_ref="IC1", side="back",
         templates={"t": template},
@@ -66,7 +67,7 @@ def test_plan_vias_sees_moved_component_after_refresh():
     c5_before.position = Vector2.from_xy(0, 0)
     c5_before.orientation = Angle.from_degrees(0.0)
     c5_before.layer = BoardLayer.BL_F_Cu
-    c5_before.definition.items = [_make_pad("2", 0.0, 0.0, "GND")]
+    c5_before.definition.items = [_make_pad("2", 0.0, 0.0, "GND"), _make_pad("1", 0.0, 0.0, "+3V3")]
 
     # C5 "после коммита" -- реальная итоговая позиция (там, где GND via
     # ДОЛЖНА оказаться, если фикс работает).
@@ -98,6 +99,7 @@ def test_plan_vias_sees_moved_component_after_refresh():
         (p for p in fp.definition.items if p.number == num), None
     )
     adapter.get_footprint_pads.side_effect = lambda fp: list(fp.definition.items)
+    adapter.get_field_value.side_effect = lambda fp, name: "LIGHT" if fp is c5_before else None
     adapter.get_net_by_name.side_effect = lambda name: net_gnd if name == "GND" else (
         net_power if name == "+3V3" else None
     )

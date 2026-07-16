@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Интеграционный тест нового конвейера (шаблоны спиц) целиком: PlacementPlanner
-(manual_position_calculator + via_planner) на моках, без живого KiCad.
+Интеграционный тест нового конвейера (DecapPlacer 4.0, роли вместо
+component1/component2) целиком: PlacementPlanner (manual_position_calculator
++ component_pool + via_planner) на моках, без живого KiCad.
 
-Использует тот же пример (пад 109 при rotation_deg=90°, пад 62 при 270°),
-с которого начался весь разговор про систему координат — теперь целиком
-через реальный класс PlacementPlanner, а не изолированные функции.
+Тот же пример (пад 109 при rotation_deg=90°, пад 62 при 270°), но теперь
+конкретные компоненты НЕ прописаны в конфиге — подбираются из пула по
+(реальная цепь, поле Role), в детерминированном (естественном) порядке.
 """
 import sys
 import math
@@ -42,7 +43,7 @@ def _make_ic1_fp(pads_config):
     return fp
 
 
-def _make_cap_fp(ref, x_mm, y_mm, angle_deg, power_net, layer=BoardLayer.BL_B_Cu):
+def _make_cap_fp(ref, x_mm, y_mm, angle_deg, power_net, role, layer=BoardLayer.BL_B_Cu):
     """Создаёт мок футпринта конденсатора УЖЕ в финальной позиции (имитация
     состояния платы ПОСЛЕ того, как executor закоммитил перемещения)."""
     fp = MagicMock()
@@ -54,6 +55,7 @@ def _make_cap_fp(ref, x_mm, y_mm, angle_deg, power_net, layer=BoardLayer.BL_B_Cu
         _make_pad("1", x_mm, y_mm, power_net),
         _make_pad("2", x_mm, y_mm, "GND"),
     ]
+    fp._role = role
     return fp
 
 
@@ -62,23 +64,25 @@ def _build_config():
         name="cap_pair_standard",
         power_via=TemplatePowerVia(offset_along_mm=0.0, offset_across_mm=-1.5,
                                    drill_mm=0.3, diameter_mm=0.6),
-        component1=TemplateComponentSlot(
-            offset_along_mm=1.0, offset_across_mm=-1.0, angle_deg=90.0,
-            gnd_via_offset_along_mm=0.0, gnd_via_offset_across_mm=-1.0,
-            gnd_via_net="GND", gnd_via_drill_mm=0.3, gnd_via_diameter_mm=0.6,
-        ),
-        component2=TemplateComponentSlot(
-            offset_along_mm=1.0, offset_across_mm=2.0, angle_deg=270.0,
-            gnd_via_offset_along_mm=0.0, gnd_via_offset_across_mm=1.3,
-            gnd_via_net="GND", gnd_via_drill_mm=0.3, gnd_via_diameter_mm=0.6,
-        ),
+        components=[
+            TemplateComponentSlot(
+                role="LIGHT",
+                offset_along_mm=1.0, offset_across_mm=-1.0, angle_deg=90.0,
+                gnd_via_offset_along_mm=0.0, gnd_via_offset_across_mm=-1.0,
+                gnd_via_net="GND", gnd_via_drill_mm=0.3, gnd_via_diameter_mm=0.6,
+            ),
+            TemplateComponentSlot(
+                role="HEAVY",
+                offset_along_mm=1.0, offset_across_mm=2.0, angle_deg=270.0,
+                gnd_via_offset_along_mm=0.0, gnd_via_offset_across_mm=1.3,
+                gnd_via_net="GND", gnd_via_drill_mm=0.3, gnd_via_diameter_mm=0.6,
+            ),
+        ],
     )
     spoke_109 = ManualSpoke(pad="109", template="cap_pair_standard",
-                           shift_x_mm=0.0, shift_y_mm=0.0, rotation_deg=90.0,
-                           component1_ref="C39", component2_ref="C54")
+                           shift_x_mm=0.0, shift_y_mm=0.0, rotation_deg=90.0)
     spoke_62 = ManualSpoke(pad="62", template="cap_pair_standard",
-                          shift_x_mm=0.4, shift_y_mm=0.0, rotation_deg=270.0,
-                          component1_ref="C10", component2_ref="C35")
+                          shift_x_mm=0.4, shift_y_mm=0.0, rotation_deg=270.0)
     cfg = Config(
         target_ref="IC1", side="back",
         templates={"cap_pair_standard": template},
@@ -90,6 +94,23 @@ def _build_config():
     return cfg
 
 
+def _make_pool_adapter(ic1, cap_fps):
+    """Общая часть настройки мока adapter: пул компонентов строится из
+    get_footprints() + get_field_value() (роль) + get_footprint_pads() (цепь)."""
+    all_fps = [ic1] + cap_fps
+    fps_by_ref = {fp.reference_field.text.value: fp for fp in all_fps}
+
+    adapter = MagicMock()
+    adapter.get_footprint.side_effect = lambda ref: fps_by_ref.get(ref)
+    adapter.get_footprints.return_value = all_fps
+    adapter.get_pad_by_number.side_effect = lambda fp, num: next(
+        (p for p in fp.definition.items if p.number == num), None
+    )
+    adapter.get_footprint_pads.side_effect = lambda fp: list(fp.definition.items)
+    adapter.get_field_value.side_effect = lambda fp, name: getattr(fp, "_role", None)
+    return adapter, fps_by_ref
+
+
 class TestFullPipelineWithTemplates:
     def test_plan_moves_positions_and_angles(self):
         cfg = _build_config()
@@ -98,36 +119,40 @@ class TestFullPipelineWithTemplates:
             ("109", *pad_pos, "+1V2_VCCINT"),
             ("62", *pad_pos, "+1V2_VCCINT"),
         ])
-
-        adapter = MagicMock()
-        adapter.get_footprint.side_effect = lambda ref: ic1 if ref == "IC1" else None
-        adapter.get_pad_by_number.side_effect = lambda fp, num: next(
-            (p for p in fp.definition.items if p.number == num), None
-        )
+        # 2 LIGHT + 2 HEAVY, естественный порядок задаёт распределение по спицам
+        cap_fps = [
+            _make_cap_fp("C10", 0, 0, 0, "+1V2_VCCINT", role="LIGHT"),
+            _make_cap_fp("C39", 0, 0, 0, "+1V2_VCCINT", role="LIGHT"),
+            _make_cap_fp("C35", 0, 0, 0, "+1V2_VCCINT", role="HEAVY"),
+            _make_cap_fp("C54", 0, 0, 0, "+1V2_VCCINT", role="HEAVY"),
+        ]
+        adapter, _ = _make_pool_adapter(ic1, cap_fps)
 
         planner = PlacementPlanner(adapter, cfg)
         moves = planner.plan_moves()
 
         assert len(moves) == 4
         by_ref = {m.ref: m for m in moves}
-        assert set(by_ref.keys()) == {"C39", "C54", "C10", "C35"}
+        # Естественная сортировка: LIGHT-пул = [C10, C39] -> spoke_109 берёт C10,
+        # spoke_62 берёт C39. HEAVY-пул = [C35, C54] -> spoke_109 берёт C35, spoke_62 -- C54.
+        assert set(by_ref.keys()) == {"C10", "C39", "C35", "C54"}
 
-        # Сверяем с независимым расчётом через rotate_local_offset (та же
-        # формула, что мы уже проверяли в test_spoke_layout.py)
         def _expected(origin_mm, along, across, rotation_deg):
             ox, oy = origin_mm
             v = rotate_local_offset(along, across, rotation_deg)
             return ox + v.x / MM, oy + v.y / MM
 
+        # spoke_109 (rotation=90°) получила первую LIGHT (C10) и первую HEAVY (C35)
         ex, ey = _expected((50.0, 50.0), 1.0, -1.0, 90.0)
-        assert abs(by_ref["C39"].position.x / MM - ex) < 1e-3
-        assert abs(by_ref["C39"].position.y / MM - ey) < 1e-3
-        assert by_ref["C39"].angle.degrees == 90.0 + 90.0
+        assert abs(by_ref["C10"].position.x / MM - ex) < 1e-3
+        assert abs(by_ref["C10"].position.y / MM - ey) < 1e-3
+        assert by_ref["C10"].angle.degrees == 90.0 + 90.0
 
+        # spoke_62 (rotation=270°, shift_x=0.4) получила вторую LIGHT (C39)
         ex2, ey2 = _expected((50.4, 50.0), 1.0, -1.0, 270.0)
-        assert abs(by_ref["C10"].position.x / MM - ex2) < 1e-3
-        assert abs(by_ref["C10"].position.y / MM - ey2) < 1e-3
-        assert by_ref["C10"].angle.degrees == 90.0 + 270.0
+        assert abs(by_ref["C39"].position.x / MM - ex2) < 1e-3
+        assert abs(by_ref["C39"].position.y / MM - ey2) < 1e-3
+        assert by_ref["C39"].angle.degrees == 90.0 + 270.0
 
     def test_plan_vias_power_and_gnd(self):
         cfg = _build_config()
@@ -136,31 +161,25 @@ class TestFullPipelineWithTemplates:
             ("109", *pad_pos, "+1V2_VCCINT"),
             ("62", *pad_pos, "+1V2_VCCINT"),
         ])
-
         # Компоненты УЖЕ в финальных позициях (имитация состояния платы
         # после того, как executor закоммитил plan_moves()).
-        c39 = _make_cap_fp("C39", 51.0, 49.0, 180.0, "+1V2_VCCINT")
-        c54 = _make_cap_fp("C54", 52.0, 49.0, 360.0, "+1V2_VCCINT")
-        c10 = _make_cap_fp("C10", 51.4, 51.0, 360.0, "+1V2_VCCINT")
-        c35 = _make_cap_fp("C35", 48.4, 51.0, 540.0, "+1V2_VCCINT")
-        fps_by_ref = {"IC1": ic1, "C39": c39, "C54": c54, "C10": c10, "C35": c35}
-
+        cap_fps = [
+            _make_cap_fp("C39", 51.0, 49.0, 180.0, "+1V2_VCCINT", role="LIGHT"),
+            _make_cap_fp("C54", 52.0, 49.0, 360.0, "+1V2_VCCINT", role="HEAVY"),
+            _make_cap_fp("C10", 51.4, 51.0, 360.0, "+1V2_VCCINT", role="LIGHT"),
+            _make_cap_fp("C35", 48.4, 51.0, 540.0, "+1V2_VCCINT", role="HEAVY"),
+        ]
         net_gnd = Net(name="GND")
         net_power = Net(name="+1V2_VCCINT")
 
-        adapter = MagicMock()
-        adapter.get_footprint.side_effect = lambda ref: fps_by_ref.get(ref)
-        adapter.get_pad_by_number.side_effect = lambda fp, num: next(
-            (p for p in fp.definition.items if p.number == num), None
-        )
-        adapter.get_footprint_pads.side_effect = lambda fp: list(fp.definition.items)
+        adapter, fps_by_ref = _make_pool_adapter(ic1, cap_fps)
         adapter.get_net_by_name.side_effect = lambda name: net_gnd if name == "GND" else (
             net_power if name == "+1V2_VCCINT" else None
         )
         adapter.get_bounding_boxes.return_value = []
 
         planner = PlacementPlanner(adapter, cfg)
-        planner.plan_moves()  # заполняет self._planned
+        planner.plan_moves()  # заполняет self._planned (и потребляет пул)
         vias = planner.plan_vias()
 
         power_vias = [v for v in vias if v.net_name == "+1V2_VCCINT"]
@@ -169,10 +188,11 @@ class TestFullPipelineWithTemplates:
         assert len(power_vias) == 2  # по одной на спицу (109 и 62)
         assert len(gnd_vias) == 4    # по одной на каждый компонент
 
-        # Проверяем, что GND via C39 действительно рядом с реальным GND-падом C39
-        c39_gnd_via = next(v for v in gnd_vias if v.owner_ref == "C39")
-        dist_mm = math.hypot(
-            (c39_gnd_via.position.x - c39.position.x) / MM,
-            (c39_gnd_via.position.y - c39.position.y) / MM,
-        )
-        assert dist_mm < 2.0, "GND via должна быть в разумной близости от своего компонента"
+        # Каждая GND via должна быть в разумной близости от СВОЕГО компонента
+        for via in gnd_vias:
+            fp = fps_by_ref[via.owner_ref]
+            dist_mm = math.hypot(
+                (via.position.x - fp.position.x) / MM,
+                (via.position.y - fp.position.y) / MM,
+            )
+            assert dist_mm < 2.0, f"GND via {via.owner_ref} слишком далеко от своего компонента"
