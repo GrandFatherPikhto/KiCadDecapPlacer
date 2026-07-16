@@ -33,7 +33,7 @@ share/python-wheels/
 # *.log
 pip-log.txt
 pip-delete-this-directory.txt
-decap_placer.txt
+kicadspoke.txt
 
 # Настройки сред разработки (IDE)
 .idea/
