@@ -29,15 +29,11 @@ def load_template(input_path: str) -> Dict[str, Any]:
     """Загружает YAML-файл и возвращает словарь с одним шаблоном."""
     with open(input_path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
-    # Поддерживаем как файл с корневым ключом templates, так и просто сам шаблон
     if 'templates' in data:
-        # Берём первый шаблон (если их несколько, можно указать имя, но для простоты берём первый)
         template_name = next(iter(data['templates']))
         template = data['templates'][template_name]
-        # Добавим имя шаблона в данные для обратной записи
         return {'name': template_name, 'template': template}
     else:
-        # Считаем, что файл содержит один шаблон без обёртки
         return {'name': 'template', 'template': data}
 
 def save_template(output_path: str, template_name: str, template: Dict[str, Any]):
@@ -55,6 +51,28 @@ def rotate_coords(along: float, across: float, angle_deg: float) -> Tuple[float,
     new_across = along * sin_a + across * cos_a
     return new_along, new_across
 
+def find_element(template: Dict[str, Any], origin_element: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+    """Находит координаты элемента в исходном шаблоне (до преобразований)."""
+    if origin_element.get('type') == 'via':
+        for via in template.get('vias', []):
+            if origin_element.get('index') is not None:
+                idx = origin_element['index']
+                if idx >= 0 and idx < len(template.get('vias', [])):
+                    return via.get('offset_along_mm', 0.0), via.get('offset_across_mm', 0.0)
+            elif origin_element.get('net') is not None:
+                if via.get('net') == origin_element['net']:
+                    return via.get('offset_along_mm', 0.0), via.get('offset_across_mm', 0.0)
+    elif origin_element.get('type') == 'component':
+        for comp in template.get('components', []):
+            if origin_element.get('index') is not None:
+                idx = origin_element['index']
+                if idx >= 0 and idx < len(template.get('components', [])):
+                    return comp.get('offset_along_mm', 0.0), comp.get('offset_across_mm', 0.0)
+            elif origin_element.get('role') is not None:
+                if comp.get('role') == origin_element['role']:
+                    return comp.get('offset_along_mm', 0.0), comp.get('offset_across_mm', 0.0)
+    return None
+
 def apply_transform(template: Dict[str, Any],
                     rotate_deg: float = 0.0,
                     mirror_x: bool = False,
@@ -64,13 +82,52 @@ def apply_transform(template: Dict[str, Any],
                     origin_y: Optional[float] = None) -> Dict[str, Any]:
     """
     Применяет преобразования к шаблону.
-    Возвращает новый шаблон (словарь).
+    Порядок: сначала перенос начала координат (если задан), затем поворот и зеркалирование.
     """
-    # Копируем шаблон, чтобы не менять исходный
     new_template = template.copy()
-    # Преобразуем vias
+    
+    # Определяем смещение (origin_along, origin_across) для переноса начала
+    if origin_element is not None:
+        coords = find_element(template, origin_element)
+        if coords is None:
+            raise ValueError(f"Не удалось найти элемент для переноса начала координат: {origin_element}")
+        origin_along, origin_across = coords
+    elif origin_x is not None and origin_y is not None:
+        origin_along = origin_x
+        origin_across = origin_y
+    else:
+        origin_along = 0.0
+        origin_across = 0.0
+
+    # Переносим начало координат (вычитаем смещение из всех элементов)
+    # Сначала vias
     new_vias = []
     for via in template.get('vias', []):
+        along = via.get('offset_along_mm', 0.0) - origin_along
+        across = via.get('offset_across_mm', 0.0) - origin_across
+        new_via = via.copy()
+        new_via['offset_along_mm'] = round(along, 6)
+        new_via['offset_across_mm'] = round(across, 6)
+        new_vias.append(new_via)
+    new_template['vias'] = new_vias
+
+    # Переносим компоненты
+    new_components = []
+    for comp in template.get('components', []):
+        along = comp.get('offset_along_mm', 0.0) - origin_along
+        across = comp.get('offset_across_mm', 0.0) - origin_across
+        angle = comp.get('angle_deg', 0.0)
+        new_comp = comp.copy()
+        new_comp['offset_along_mm'] = round(along, 6)
+        new_comp['offset_across_mm'] = round(across, 6)
+        new_comp['angle_deg'] = round(angle, 6)
+        new_components.append(new_comp)
+    new_template['components'] = new_components
+
+    # Теперь применяем поворот и зеркалирование к уже смещённым координатам
+    # Vias
+    transformed_vias = []
+    for via in new_template.get('vias', []):
         along = via.get('offset_along_mm', 0.0)
         across = via.get('offset_across_mm', 0.0)
         # Зеркалирование
@@ -84,12 +141,12 @@ def apply_transform(template: Dict[str, Any],
         new_via = via.copy()
         new_via['offset_along_mm'] = round(along, 6)
         new_via['offset_across_mm'] = round(across, 6)
-        new_vias.append(new_via)
-    new_template['vias'] = new_vias
+        transformed_vias.append(new_via)
+    new_template['vias'] = transformed_vias
 
-    # Преобразуем компоненты
-    new_components = []
-    for comp in template.get('components', []):
+    # Компоненты
+    transformed_components = []
+    for comp in new_template.get('components', []):
         along = comp.get('offset_along_mm', 0.0)
         across = comp.get('offset_across_mm', 0.0)
         angle = comp.get('angle_deg', 0.0)
@@ -112,62 +169,8 @@ def apply_transform(template: Dict[str, Any],
         new_comp['offset_along_mm'] = round(along, 6)
         new_comp['offset_across_mm'] = round(across, 6)
         new_comp['angle_deg'] = round(angle, 6)
-        new_components.append(new_comp)
-    new_template['components'] = new_components
-
-    # Перенос начала координат
-    if origin_element is not None:
-        # Находим координаты элемента после преобразований
-        # Элемент может быть via или компонентом
-        # Ищем в vias
-        found = None
-        for via in new_template.get('vias', []):
-            # Сравниваем по индексу или по net
-            # origin_element должен содержать тип и ключ
-            if origin_element.get('type') == 'via':
-                if origin_element.get('index') is not None:
-                    idx = origin_element['index']
-                    if idx >= 0 and idx < len(new_template['vias']):
-                        found = new_template['vias'][idx]
-                        break
-                elif origin_element.get('net') is not None:
-                    if via.get('net') == origin_element['net']:
-                        found = via
-                        break
-        if found is None:
-            # Ищем в компонентах
-            for comp in new_template.get('components', []):
-                if origin_element.get('type') == 'component':
-                    if origin_element.get('index') is not None:
-                        idx = origin_element['index']
-                        if idx >= 0 and idx < len(new_template['components']):
-                            found = new_template['components'][idx]
-                            break
-                    elif origin_element.get('role') is not None:
-                        if comp.get('role') == origin_element['role']:
-                            found = comp
-                            break
-        if found is None:
-            raise ValueError(f"Не удалось найти элемент для переноса начала координат: {origin_element}")
-        # Получаем координаты found
-        origin_along = found.get('offset_along_mm', 0.0)
-        origin_across = found.get('offset_across_mm', 0.0)
-        # Вычитаем из всех via
-        for via in new_template.get('vias', []):
-            via['offset_along_mm'] = round(via['offset_along_mm'] - origin_along, 6)
-            via['offset_across_mm'] = round(via['offset_across_mm'] - origin_across, 6)
-        # Вычитаем из всех компонентов
-        for comp in new_template.get('components', []):
-            comp['offset_along_mm'] = round(comp['offset_along_mm'] - origin_along, 6)
-            comp['offset_across_mm'] = round(comp['offset_across_mm'] - origin_across, 6)
-    elif origin_x is not None and origin_y is not None:
-        # Явный сдвиг
-        for via in new_template.get('vias', []):
-            via['offset_along_mm'] = round(via['offset_along_mm'] - origin_x, 6)
-            via['offset_across_mm'] = round(via['offset_across_mm'] - origin_y, 6)
-        for comp in new_template.get('components', []):
-            comp['offset_along_mm'] = round(comp['offset_along_mm'] - origin_x, 6)
-            comp['offset_across_mm'] = round(comp['offset_across_mm'] - origin_y, 6)
+        transformed_components.append(new_comp)
+    new_template['components'] = transformed_components
 
     return new_template
 
@@ -202,7 +205,7 @@ def main():
         origin_element = {'type': 'component', 'index': args.set_origin_by_component_index}
     elif args.set_origin_by_component_role is not None:
         origin_element = {'type': 'component', 'role': args.set_origin_by_component_role}
-    # Если явно заданы origin_x/y, используем их, иначе передаём None
+
     if args.origin_x is not None and args.origin_y is not None:
         origin_x = args.origin_x
         origin_y = args.origin_y
