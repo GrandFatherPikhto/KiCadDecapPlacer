@@ -1,4 +1,4 @@
-# KiCadSpoke v1.0.10
+# KiCadSpoke v1.20.0
 
 **KiCadSpoke** is a command-line tool for automated placement of components and vias on PCBs in **KiCad** based on **templates** and **roles**. It connects to a running KiCad instance via IPC and performs:
 
