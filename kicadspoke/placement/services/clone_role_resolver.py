@@ -24,12 +24,15 @@ clone_role_resolver.py — сопоставление роль->ref для Clone
 автоматики в выборе режима самим резолвером нет.
 """
 import logging
-from typing import Dict, List
+import math
+from typing import Dict, List, Optional
 from kipy.board_types import FootprintInstance
+from kipy.geometry import Vector2
 
 from ...config import SpokeTemplate, ClonePlacement
 from ...exceptions import ValidationError, format_fatal_error
 from ...net_resolution import resolve_net
+from ...utils.units import MM
 from .component_pool import ROLE_FIELD_NAME
 
 logger = logging.getLogger(__name__)
@@ -96,7 +99,8 @@ def _sheet_key(fp) -> str:
         return ''
 
 
-def resolve_roles_by_nets(adapter, template: SpokeTemplate, clone: ClonePlacement) -> Dict[str, str]:
+def resolve_roles_by_nets(adapter, template: SpokeTemplate, clone: ClonePlacement,
+                          anchor_position: Optional[Vector2] = None) -> Dict[str, str]:
     """
     Сопоставление по явным/параметризованным цепям (без выделения мышкой
     как ОСНОВНОГО механизма — но текущее выделение, если оно есть,
@@ -104,18 +108,25 @@ def resolve_roles_by_nets(adapter, template: SpokeTemplate, clone: ClonePlacemen
 
     Каскад разрешения неоднозначности (каждая ступень только СУЖАЕТ,
     ничего не выбирает за человека):
-      0. clone.refs[role] — явный override, минуя поиск вовсе.
+      0. clone.refs[role] — явный override, минуя поиск вовсе. Ломается
+         при реаннотации (refdes не стабилен) — крайняя мера, не основной
+         путь.
       1. кандидаты = Role-поле совпадает И сидит на ожидаемой цепи.
       2. если кандидатов несколько — сузить до пересечения с ТЕКУЩИМ
-         выделением на плате, если оно не пусто и сужает хоть что-то
-         (человек руками выделил конкретный экземпляр перед запуском —
-         явный сигнал, приоритетнее эвристики по листу ниже).
+         выделением на плате, если оно не пусто и сужает хоть что-то.
       3. всё ещё несколько — сузить до соседей по листу иерархии с уже
-         однозначно разрешёнными ролями ЭТОГО ЖЕ размещения.
-      4. всё ещё несколько — ФАТАЛ: кандидаты электрически неразличимы,
-         человеку предлагается либо развести роли по именам, либо явный
-         refs, либо (теперь) выделить нужный экземпляр на плате и
-         перезапустить.
+         однозначно разрешёнными ролями ЭТОГО ЖЕ размещения (не помогает,
+         если у неоднозначных ролей нет отдельного сабшита на инстанс —
+         типовой случай общей силовой цепи/развязки, не DAC-сигнала).
+      4. всё ещё несколько, и задан anchor_position — сузить по физической
+         близости к якорю ЭТОГО clone_placement: ближайший кандидат
+         побеждает, но только с явным отрывом (ближайший минимум вдвое
+         ближе второго) — иначе это не решение, а монетка, фатал. Не
+         зависит ни от refdes, ни от листа/цепи — переживает реаннотацию.
+      5. всё ещё несколько — ФАТАЛ: кандидаты неразличимы всеми
+         доступными способами, человеку предлагается либо развести роли
+         по именам в схеме, либо выделить нужный экземпляр, либо (крайняя
+         мера) явный refs.
     """
     selected_items = adapter.get_selected_items()
     selected_refs = {i.reference_field.text.value for i in selected_items
@@ -213,6 +224,29 @@ def resolve_roles_by_nets(adapter, template: SpokeTemplate, clone: ClonePlacemen
                                 f"разрешённых соседей")
                 narrowed = by_sheet
 
+        by_distance_note = ""
+        if len(narrowed) > 1 and anchor_position is not None:
+            with_dist = sorted(
+                ((math.hypot((fp.position.x - anchor_position.x) / MM,
+                             (fp.position.y - anchor_position.y) / MM), fp)
+                 for fp in narrowed),
+                key=lambda t: t[0]
+            )
+            closest_dist, closest_fp = with_dist[0]
+            second_dist = with_dist[1][0]
+            by_distance_note = (f" (ближайший к якорю {clone.name!r}: "
+                                f"{closest_fp.reference_field.text.value} на "
+                                f"{closest_dist:.2f} мм, второй — {second_dist:.2f} мм)")
+            if second_dist >= 2 * max(closest_dist, 1e-6):
+                logger.info(f"[{clone.name}] роль {role!r}: {len(narrowed)} кандидатов "
+                            f"сужено до 1 по физической близости к якорю "
+                            f"({closest_fp.reference_field.text.value}, {closest_dist:.2f} мм, "
+                            f"второй ближайший — {second_dist:.2f} мм, отрыв достаточный)")
+                narrowed = [closest_fp]
+            else:
+                logger.debug(f"[{clone.name}] роль {role!r}: по близости к якорю не сузить — "
+                            f"{closest_dist:.2f} мм vs {second_dist:.2f} мм, отрыв недостаточный")
+
         if len(narrowed) == 1:
             role_to_ref[role] = narrowed[0].reference_field.text.value
             resolved_fps.append(narrowed[0])
@@ -224,6 +258,7 @@ def resolve_roles_by_nets(adapter, template: SpokeTemplate, clone: ClonePlacemen
                 + (" (уже в одном листе иерархии — кандидаты электрически "
                    "неразличимы; типовой случай: несколько одинаковых фильтров "
                    "в одном листе с одинаковыми ролями)" if neighbor_sheets else "")
+                + by_distance_note
                 + f": {refs}. Выходы: выделите нужный экземпляр целиком на плате перед "
                 f"запуском, ЛИБО разведите роли по именам в схеме "
                 f"(напр. DAC_PI_3V3_C1 vs DAC_PI_AVDD_C1), ЛИБО укажите явно: "
