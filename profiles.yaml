@@ -1,0 +1,22 @@
+extract_profiles:
+  pi_filter_1v2_vccint:
+    name: pi_filter_4
+    output: templates/pi_filter_4_template.yaml
+    origin_by_via_net: "+1V2_VCCINT"
+    param: {PWR_IN: "+1V2", PWR_OUT: "+1V2_VCCINT"}
+    net_template: {"+1V2_VCCINT": "{PWR_OUT}", "+1V2": "{PWR_IN}"}
+
+  pm5v_pi_filter:
+    name: pm5v_pi_filter
+    output: templates/pm5v_pi_filter_template.yaml
+    origin_by_via_net: "+5V_DIRTY"
+    param: {PWR_IN: "+5V_DIRTY", PWR_OUT: "+5V"}
+
+clone_profiles:
+  channel_0:
+    net: netlist.net
+    pcb: board.kicad_pcb
+    channel: Channel_0
+    output: snapshots/channel_0.yaml
+
+

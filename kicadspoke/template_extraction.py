@@ -56,24 +56,51 @@ def _point_matches_any(point: Vector2, anchors: List[Vector2]) -> bool:
     return any(_points_match(point, a) for a in anchors)
 
 
+_BBOX_EPSILON_MM = 0.001  # НЕ допуск на неточность трассировки (реальный bbox via/пада
+                          # уже даёт весь нужный запас сам по себе — радиус via обычно на
+                          # порядок больше любой погрешности ручной трассировки) — это чисто
+                          # защита от квантования координат/плавающей точки при округлении
+                          # до нм, ничего общего с "насколько криво трек воткнули"
+
+
+def _inflated_boxes(adapter: KiCadBoardAdapter, items: List[Any]) -> List[Any]:
+    boxes = adapter.get_bounding_boxes(items)
+    for b in boxes:
+        if b is not None:
+            b.inflate(int(_BBOX_EPSILON_MM * MM))
+    return boxes
+
+
+def _point_in_box(point: Vector2, box) -> bool:
+    if box is None:
+        return False
+    return (box.pos.x <= point.x <= box.pos.x + box.size.x
+            and box.pos.y <= point.y <= box.pos.y + box.size.y)
+
+
 def _filter_tracks_within_selection(
     tracks: List[Track], footprints: List[FootprintInstance], vias: List[Via],
     adapter: KiCadBoardAdapter,
 ) -> List[Track]:
     """
     Оставляет только треки, у которых ОБА конца совпадают с чем-то ещё
-    в выделении (падом компонента, via, или концом другого трека — для
-    стыков без via). Не полагаемся на то, что выделило само KiCad — рамка
-    обычно не даёт выделить торчащий наружу трек целиком, но Ctrl+клик
-    или "select net" вполне могут, так что проверяем геометрию явно.
+    в выделении. "Совпадают" — не точное равенство координат (KiCad не
+    требует этого для электрической связности — связность это перекрытие
+    меди в пределах реального пятна via/пада, а не координата до микрона;
+    ручная трассировка почти никогда не попадает ровно в центр), а
+    попадание конца трека в РЕАЛЬНЫЙ bounding box соответствующего via
+    или пада (+небольшой технологический запас, _PAD_MATCH_MARGIN_MM).
+    Для стыков трек-к-треку (без via/пада между ними) запаса нет и не
+    нужно — там либо конец в конец, либо это два разных трека.
     """
-    pad_points = [p.position for fp in footprints for p in adapter.get_footprint_pads(fp)]
-    via_points = [v.position for v in vias]
+    all_pads = [p for fp in footprints for p in adapter.get_footprint_pads(fp)]
+    pad_boxes = _inflated_boxes(adapter, all_pads)
+    via_boxes = _inflated_boxes(adapter, vias)
 
     def endpoint_ok(point: Vector2, this_track: Track) -> bool:
-        if _point_matches_any(point, via_points):
+        if any(_point_in_box(point, box) for box in via_boxes):
             return True
-        if _point_matches_any(point, pad_points):
+        if any(_point_in_box(point, box) for box in pad_boxes):
             return True
         for other in tracks:
             if other is this_track:
@@ -178,7 +205,17 @@ def extract_template_from_selection(
     сможет её потом переиспользовать без live-доступа к падам.
     """
     params = params or {}
-    net_template_map = net_template_map or {}
+    net_template_map = dict(net_template_map or {})
+    # Авто-вывод для простого случая: если весь литерал цепи РАВЕН значению
+    # параметра целиком (не часть более длинной строки) — net_template
+    # однозначно выводится из params, дублировать явным --net-template не
+    # нужно. Явная запись в net_template_map (если дана) имеет приоритет —
+    # это оставляет лазейку для компаунд-случая (плейсхолдер внутри более
+    # длинного литерала вроде DAC{channel}_DB1), где угадать позицию
+    # плейсхолдера нельзя и писать надо руками.
+    for key, value in params.items():
+        if value not in net_template_map:
+            net_template_map[value] = f"{{{key}}}"
     items = adapter.get_selected_items()
     footprints = [i for i in items if isinstance(i, FootprintInstance)]
     vias = [i for i in items if isinstance(i, Via)]
