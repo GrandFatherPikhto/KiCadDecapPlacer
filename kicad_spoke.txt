@@ -51,6 +51,7 @@ kicadspoke\placement\executor\batch_executor.py
 kicadspoke\placement\executor\flip_manager.py
 kicadspoke\placement\executor\move_executor.py
 kicadspoke\placement\executor\operation_logger.py
+kicadspoke\placement\executor\track_executor.py
 kicadspoke\placement\executor\via_executor.py
 kicadspoke\placement\interfaces.py
 kicadspoke\placement\planner.py

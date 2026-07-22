@@ -1,4 +1,3 @@
-templates:
   pi_filter_4:
     vias:
     - offset_along_mm: -4.6
