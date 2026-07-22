@@ -1,6 +1,6 @@
 # KiCadSpoke v1.20.0
 
-**KiCadSpoke** is a command-line tool for automated placement of components and vias on PCBs in **KiCad** based on **templates** and **roles**. It connects to a running KiCad instance via IPC and performs:
+**KiCadSpoke** is a command-line layout automation and PCB cloning tool for automated placement in **KiCad**, block replication, and routing of components and vias in KiCad based on **templates** and **roles**:
 
 - Moving components (capacitors, resistors, ferrites, crystals, etc.) to specified positions.
 - Creating vias attached to the spoke as a whole or to individual components.
@@ -15,6 +15,8 @@
 ---
 
 ## Key Features
+
+An advanced script-based alternative to the traditional KiCad Replicate Layout plugin, designed for complex multi-channel projects and automated design reuse via IPC API.
 
 - **Template-based approach** – geometry is described once in local coordinates and can be rotated/translated for each application.
 - **Automatic component selection** – instead of refdes, roles are used (`LIGHT`, `HEAVY`, `PI_FILTER_C1`, etc.). Specific instances are taken from a pool by net and the `Role` field in the schematic.

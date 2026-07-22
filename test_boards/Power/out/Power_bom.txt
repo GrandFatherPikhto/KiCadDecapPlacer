@@ -1,0 +1,59 @@
+=== BOM (список компонентов) для Power.net ===
+
+Компонент | Номинал                   | Footprint                     
+------------------------------------------------------------------
+C201   | TAJD107K016RNJ            | CP_EIA-7343-20_Kemet-V_HandSolder
+C202   | TAJD107K016RNJ            | CP_EIA-7343-20_Kemet-V_HandSolder
+C203   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C204   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C205   | TAJB476K010UNJ            | CP_EIA-3528-12_Kemet-T_HandSolder
+C206   | TAJB476K010UNJ            | CP_EIA-3528-12_Kemet-T_HandSolder
+C207   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C208   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C209   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C210   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C211   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C212   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C213   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C214   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C215   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C216   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C217   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C218   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C219   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C220   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C221   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C222   | 1 uF                      | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C223   | 10 uF                     | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C224   | 10 uF                     | C_1206_3216Metric_Pad1.33x1.80mm_HandSolder
+C225   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+C226   | 100 nF                    | C_0603_1608Metric_Pad1.08x0.95mm_HandSolder
+D201   | LED                       | D_0805_2012Metric_Pad1.15x1.40mm_HandSolder
+D202   | LED                       | D_0805_2012Metric_Pad1.15x1.40mm_HandSolder
+D203   | LED                       | D_0805_2012Metric_Pad1.15x1.40mm_HandSolder
+D204   | D                         | D_SMA_Handsoldering           
+D205   | D                         | D_SMA_Handsoldering           
+D206   | D                         | D_SMA_Handsoldering           
+D207   | D                         | D_SMA_Handsoldering           
+D208   | LED                       | D_0805_2012Metric_Pad1.15x1.40mm_HandSolder
+D209   | LED                       | D_0805_2012Metric_Pad1.15x1.40mm_HandSolder
+FB201  | BLM21PG121SN1D            | L_0805_2012Metric             
+FB202  | BLM21PG121SN1D            | L_0805_2012Metric             
+FB203  | BLM15PD121SN1D            | L_0402_1005Metric             
+FB204  | BLM15PD121SN1D            | L_0402_1005Metric             
+FB205  | BLM15PD121SN1D            | L_0402_1005Metric             
+FB206  | BLM15PD121SN1D            | L_0402_1005Metric             
+J201   | ±5V In                    | JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical
+R203   | 470                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R204   | 470                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R205   | 330                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R206   | 240                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R207   | 240                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R208   | 240                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R209   | 240                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R210   | 220                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+R211   | 220                       | R_0603_1608Metric_Pad0.98x0.95mm_HandSolder
+U201   | AMS1117-1.2               | SOT-223-3_TabPin2             
+U202   | AMS1117CD-3.3             | TO-252-3_TabPin2              
+U203   | LM317_TO-252              | TO-252-2                      
+U204   | LM337_TO252               | TO-252-2                      
