@@ -134,14 +134,19 @@ def _bbox_origin(footprints: List[FootprintInstance], vias: List[Via]) -> Vector
 
 def _find_origin(footprints: List[FootprintInstance], vias: List[Via],
                  origin_via_net: Optional[str], origin_component_role: Optional[str],
+                 origin_component_pad: Optional[str],
                  adapter: KiCadBoardAdapter) -> Vector2:
     """
     origin по умолчанию — bbox (см. _bbox_origin). Если задан origin_via_net
     или origin_component_role — origin берётся из конкретного элемента
-    выделения (его текущая позиция на плате), а не из bbox. Оба варианта
-    взаимоисключающие, проверяется в kicadspoke_cli.py. Фатально, если
-    элемент не найден или (для via_net) неоднозначен — никакого угадывания
-    "первого попавшегося".
+    выделения (его текущая позиция на плате), а не из bbox. origin_via_net
+    и origin_component_role взаимоисключающие (проверяется в
+    kicadspoke_cli.py). origin_component_pad — ТОЛЬКО уточнение
+    origin_component_role (без него бессмысленен, фатал в kicadspoke_cli.py):
+    без него origin — центр компонента этой роли, с ним — позиция
+    конкретного пада (тот же принцип, что anchor_pad у ClonePlacement).
+    Фатально, если элемент не найден или (для via_net) неоднозначен —
+    никакого угадывания "первого попавшегося".
     """
     if origin_via_net is not None:
         candidates = [v for v in vias if v.net and v.net.name == origin_via_net]
@@ -163,7 +168,17 @@ def _find_origin(footprints: List[FootprintInstance], vias: List[Via],
     if origin_component_role is not None:
         for fp in footprints:
             if adapter.get_field_value(fp, ROLE_FIELD_NAME) == origin_component_role:
-                return fp.position
+                if origin_component_pad is None:
+                    return fp.position
+                pad = adapter.get_pad_by_number(fp, origin_component_pad)
+                if pad is None:
+                    raise ValidationError(format_fatal_error(
+                        f"--origin-by-component-pad {origin_component_pad!r} не найден",
+                        [f"у компонента роли {origin_component_role!r} "
+                         f"({fp.reference_field.text.value}) нет площадки "
+                         f"{origin_component_pad!r} — номера падов это строки, как в KiCad"]
+                    ))
+                return pad.position
         raise ValidationError(format_fatal_error(
             f"--origin-by-component-role {origin_component_role!r} не найден в выделении",
             [f"среди {len(footprints)} выделенных компонентов нет ни одного "
@@ -180,6 +195,7 @@ def extract_template_from_selection(
     net_template_map: Optional[Dict[str, str]] = None,
     origin_via_net: Optional[str] = None,
     origin_component_role: Optional[str] = None,
+    origin_component_pad: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Строит словарь {name: {vias: [...], components: [...]}}, готовый к
@@ -199,10 +215,10 @@ def extract_template_from_selection(
     origin_via_net/origin_component_role — ОБА опциональны, взаимоисключающие
     (см. --origin-by-via-net/--origin-by-component-role в kicadspoke_cli.py).
     Без них origin — bbox выделения, как раньше. С ними — origin берётся из
-    текущей позиции конкретного via/компонента; про опору на пад компонента
-    см. обсуждение в чате — здесь принципиально не реализовано, потому что
-    transform_template.py (пост-обработка без живой платы) всё равно не
-    сможет её потом переиспользовать без live-доступа к падам.
+    текущей позиции конкретного via/компонента. origin_component_pad —
+    ТОЛЬКО уточнение origin_component_role (см. --origin-by-component-pad):
+    без него origin — центр компонента этой роли, с ним — позиция
+    конкретного пада (тот же принцип, что anchor_pad у ClonePlacement).
     """
     params = params or {}
     net_template_map = dict(net_template_map or {})
@@ -257,7 +273,8 @@ def extract_template_from_selection(
     if problems:
         raise ValidationError(format_fatal_error("проблемы в текущем выделении", problems))
 
-    origin = _find_origin(footprints, vias, origin_via_net, origin_component_role, adapter)
+    origin = _find_origin(footprints, vias, origin_via_net, origin_component_role,
+                          origin_component_pad, adapter)
     origin_desc = (f"via на цепи {origin_via_net!r}" if origin_via_net
                    else f"компонент роли {origin_component_role!r}" if origin_component_role
                    else "bbox выделения (левый нижний угол)")

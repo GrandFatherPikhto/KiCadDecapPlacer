@@ -17,7 +17,7 @@ import logging
 from typing import List, Tuple, Optional
 from kipy.geometry import Vector2
 from kipy.board_types import BoardLayer
-from ...config import Config, ClonePlacement
+from ...config import Config, ClonePlacement, SpokeTemplate, TemplateComponentSlot
 from ...exceptions import ValidationError, format_fatal_error
 from ...kicad.adapter import KiCadBoardAdapter
 from ...geometry.clone_geometry import apply_clone_geometry
@@ -101,10 +101,25 @@ class ClonePositionCalculator:
         for clone in clone_placements:
             if not clone.enabled:
                 continue
-            template = self.cfg.templates.get(clone.template)
-            if template is None:
-                logger.warning(f"{clone.name}: шаблон {clone.template!r} не найден в templates, пропуск")
-                continue
+            if clone.template is not None:
+                template = self.cfg.templates.get(clone.template)
+                if template is None:
+                    logger.warning(f"{clone.name}: шаблон {clone.template!r} не найден в templates, пропуск")
+                    continue
+                template_name = clone.template
+            else:
+                # role: вместо template — однокомпонентное размещение без
+                # отдельного файла шаблона (см. обсуждение в чате: заводить
+                # templates-запись ради одной роли без единой via/трека
+                # неудобно). Синтезируем шаблон "на лету", каждый раз заново
+                # (дёшево — один компонент, никакого кеширования не нужно).
+                template = SpokeTemplate(
+                    name=f"__role__{clone.role}",
+                    components=[TemplateComponentSlot(
+                        role=clone.role, offset_along_mm=0.0, offset_across_mm=0.0, angle_deg=0.0,
+                    )],
+                )
+                template_name = template.name
 
             # Якорь считаем ДО резолва ролей — нужен для сужения физической
             # близостью (resolve_roles_by_nets), и тот же самый потом идёт
@@ -136,7 +151,7 @@ class ClonePositionCalculator:
                 vias_result.append(ViaCommand(
                     position=via.position, drill_mm=via.drill_mm, diameter_mm=via.diameter_mm,
                     net_name=via.net, owner_ref=clone.name,
-                    registry_key=make_registry_key(anchor_id, clone.template, None, via_index),
+                    registry_key=make_registry_key(anchor_id, template_name, None, via_index),
                 ))
                 logger.debug(f"  [{clone.name}] via спицы: "
                             f"({via.position.x/1e6:.3f}, {via.position.y/1e6:.3f}) мм, net={via.net}")
@@ -146,7 +161,7 @@ class ClonePositionCalculator:
                 tracks_result.append(TrackCommand(
                     start=track.start, end=track.end, width_mm=track.width_mm,
                     net_name=track.net, layer=track_layer, owner_ref=clone.name,
-                    registry_key=make_registry_key(anchor_id, clone.template, None, track_index),
+                    registry_key=make_registry_key(anchor_id, template_name, None, track_index),
                 ))
                 logger.debug(f"  [{clone.name}] track: "
                             f"({track.start.x/1e6:.3f}, {track.start.y/1e6:.3f}) -> "
@@ -174,7 +189,7 @@ class ClonePositionCalculator:
                     vias_result.append(ViaCommand(
                         position=via.position, drill_mm=via.drill_mm, diameter_mm=via.diameter_mm,
                         net_name=via.net, owner_ref=comp_layout.ref,
-                        registry_key=make_registry_key(anchor_id, clone.template, comp_layout.role, via_index),
+                        registry_key=make_registry_key(anchor_id, template_name, comp_layout.role, via_index),
                     ))
 
         return components_result, vias_result, tracks_result

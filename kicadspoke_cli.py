@@ -175,7 +175,8 @@ def cmd_extract(args):
     adapter.refresh_board()
 
     direct_args_given = bool(args.name or args.output or args.param or args.net_template
-                             or args.origin_by_via_net or args.origin_by_component_role)
+                             or args.origin_by_via_net or args.origin_by_component_role
+                             or args.origin_by_component_pad)
     if args.profile and direct_args_given:
         sys.exit("[ошибка] --profile нельзя сочетать с --name/--output/--param/--net-template/"
                  "--origin-by-*: либо всё из профиля, либо всё явными флагами, не вперемешку")
@@ -193,6 +194,7 @@ def cmd_extract(args):
         net_template_map = dict(prof.get("net_template", {}) or {})
         origin_via_net = prof.get("origin_by_via_net")
         origin_component_role = prof.get("origin_by_component_role")
+        origin_component_pad = prof.get("origin_by_component_pad")
         logger.info(f"Профиль {args.profile!r} из {args.profiles}: name={name}, output={output}")
     else:
         name = args.name
@@ -216,11 +218,17 @@ def cmd_extract(args):
             net_template_map[literal] = pattern
         origin_via_net = args.origin_by_via_net
         origin_component_role = args.origin_by_component_role
+        origin_component_pad = args.origin_by_component_pad
+
+    if origin_component_pad and not origin_component_role:
+        sys.exit("[ошибка] --origin-by-component-pad без --origin-by-component-role — "
+                 "уточнять пад можно только у роли, которую сначала надо указать")
 
     template_dict = extract_template_from_selection(
         adapter, name, params=params, net_template_map=net_template_map,
         origin_via_net=origin_via_net,
         origin_component_role=origin_component_role,
+        origin_component_pad=origin_component_pad,
     )
 
     output_path = Path(output)
@@ -338,6 +346,10 @@ def main():
                               help="Origin шаблона — позиция компонента с этой ролью "
                                    "(вместо bbox выделения); фатально, если роли нет "
                                    "в выделении")
+    extract_parser.add_argument("--origin-by-component-pad", metavar="PAD",
+                                help="Уточнение --origin-by-component-role: origin — позиция "
+                                     "конкретного пада этого компонента, а не его центр. "
+                                     "Бессмысленен и фатален без --origin-by-component-role")
 
     args = parser.parse_args()
 

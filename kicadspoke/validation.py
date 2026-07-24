@@ -102,12 +102,15 @@ def check_role_pool_sufficiency(adapter: KiCadBoardAdapter, cfg: Config) -> None
 
 def check_clone_templates_exist(cfg: Config) -> None:
     """
-    Каждый ClonePlacement должен ссылаться на существующий шаблон — чисто
-    конфиговая проверка, живой платы не требует вообще.
+    Каждый ClonePlacement с template (не role) должен ссылаться на
+    существующий шаблон — чисто конфиговая проверка, живой платы не
+    требует вообще. role-размещения пропускаются: у них template
+    намеренно None, ClonePositionCalculator синтезирует однокомпонентный
+    шаблон на лету, проверять в cfg.templates нечего.
     """
     problems = []
     for clone in cfg.clone_placements:
-        if not clone.enabled:
+        if not clone.enabled or clone.template is None:
             continue
         if clone.template not in cfg.templates:
             problems.append(f"clone_placements {clone.name!r}: шаблон {clone.template!r} не найден в templates")
@@ -122,14 +125,19 @@ def check_no_duplicate_clone_anchors(cfg: Config) -> None:
       1. Имена clone_placements[].name должны быть уникальны — это теперь
          единственный идентификатор для anchor-less размещений (см.
          clone_anchor_id) и в любом случае годная гигиена конфига.
-      2. (template, anchor_ref, anchor_pad) среди clone_placements С
+      2. (содержимое, anchor_ref, anchor_pad) среди clone_placements С
          заданным anchor_ref должен быть уникален — это ровно та
          identity, по которой теперь живёт реестр (registry.py); если
          два разных clone_placement случайно указывают один и тот же
-         физический якорь под одним шаблоном, реестр не сможет их
-         различить и будет путать via/треки одного с другим. Совпадение
-         почти наверняка copy-paste опечатка (забыли поменять anchor_pad
-         во втором блоке), а не осознанное намерение.
+         физический якорь под одним и тем же содержимым, реестр не
+         сможет их различить и будет путать via/треки одного с другим.
+         "Содержимое" — template ИЛИ role (см. ClonePlacement) — два
+         РАЗНЫХ role на одном и том же якоре НЕ дубль (разные компоненты
+         в одной точке — обычное дело), поэтому используем то, что
+         реально задано, а не голый clone.template (он None у role-
+         размещений, и тогда два разных role молча схлопнулись бы в один
+         ключ). Совпадение почти наверняка copy-paste опечатка (забыли
+         поменять anchor_pad во втором блоке), а не осознанное намерение.
     """
     problems = []
     seen_names = {}
@@ -143,20 +151,22 @@ def check_no_duplicate_clone_anchors(cfg: Config) -> None:
                             f"имена должны быть уникальны")
         seen_names[clone.name] = True
 
+        content_id = clone.template if clone.template is not None else f"role:{clone.role}"
+
         if clone.anchor_ref is not None:
-            key = (clone.template, clone.anchor_ref, clone.anchor_pad)
+            key = (content_id, clone.anchor_ref, clone.anchor_pad)
             if key in seen_ref_anchors:
                 problems.append(f"{clone.name!r} и {seen_ref_anchors[key]!r}: оба указывают один и тот же "
-                                f"якорь (template={clone.template!r}, anchor_ref={clone.anchor_ref!r}, "
+                                f"якорь (template/role={content_id!r}, anchor_ref={clone.anchor_ref!r}, "
                                 f"anchor_pad={clone.anchor_pad!r}) — реестр не сможет различить их via/"
                                 f"треки; похоже на copy-paste опечатку (забыли поменять anchor_pad)")
             seen_ref_anchors[key] = clone.name
 
         if clone.anchor_role is not None:
-            key = (clone.template, clone.anchor_role, clone.anchor_sheet, clone.anchor_pad)
+            key = (content_id, clone.anchor_role, clone.anchor_sheet, clone.anchor_pad)
             if key in seen_role_anchors:
                 problems.append(f"{clone.name!r} и {seen_role_anchors[key]!r}: оба указывают один и тот же "
-                                f"якорь (template={clone.template!r}, anchor_role={clone.anchor_role!r}, "
+                                f"якорь (template/role={content_id!r}, anchor_role={clone.anchor_role!r}, "
                                 f"anchor_sheet={clone.anchor_sheet!r}, anchor_pad={clone.anchor_pad!r}) — "
                                 f"реестр не сможет различить их via/треки; похоже на copy-paste опечатку "
                                 f"(забыли поменять anchor_sheet/anchor_pad)")
